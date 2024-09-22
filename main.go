@@ -91,7 +91,7 @@ func main() {
 }
 
 // Version will be set during build time
-var Version = "dev"
+var Version = "v0.9.4"
 
 func printVersion() {
 	fmt.Printf("go2type version %s\n", Version)
