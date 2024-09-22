@@ -441,6 +441,21 @@ func TestGenerateFile(t *testing.T) {
 			},
 		},
 		{
+			name:          "React hooks, with date object",
+			outputFile:    filepath.Join(tmpdir, "react_hooks__with_date_obj.ts"),
+			useHooks:      true,
+			useReactQuery: false,
+			useDateObject: true,
+			expectedContent: []string{
+				"export type User",
+				"export type GetUserInput",
+				"export type CreateUserInput",
+				"export const useGetUser",
+				"export const useCreateUser",
+				"useState<User | null>",
+			},
+		},
+		{
 			name:          "React Query hooks, no date object",
 			outputFile:    filepath.Join(tmpdir, "react_query_hooks__no_date_obj.ts"),
 			useHooks:      true,
