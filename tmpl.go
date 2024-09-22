@@ -1,5 +1,6 @@
 package main
 
+// TemplateData is the data passed to the template for generating the TypeScript file
 type TemplateData struct {
 	Version       string
 	Timestamp     string
@@ -10,6 +11,7 @@ type TemplateData struct {
 	UseReactQuery bool
 }
 
+// The magic
 const fileTemplate = `
 {{- define "last"}}
     {{index . (sub (len .) 1)}}
@@ -44,7 +46,7 @@ export type {{.Name}} = { {{range .Fields}}
 {{$authToken := .AuthToken}}
 {{range .Handlers}}
 // Separate query function
-export const {{.Name}}Query = async ({{if .URLParams}}{{range $index, $param := .URLParams}}{{if $index}}, {{end}}{{$param}}: string{{end}}{{if or .InputType .Headers}}, {{end}}{{end}}{{if .InputType}}input: {{.InputType}}{{if .Headers}}, {{end}}{{end}}{{range $index, $header := .Headers}}{{if $index}}, {{end}}{{$header.Name}}: string{{end}}): Promise<{{.OutputType}}> => {
+export const {{.Name}}Query = async ({{if .URLParams}}{{range $index, $param := .URLParams}}{{if $index}}, {{end}}{{$param}}: string{{end}}{{if or .InputType (inputHeaders .Headers)}}, {{end}}{{end}}{{if .InputType}}input: {{.InputType}}{{if inputHeaders .Headers}}, {{end}}{{end}}{{range $index, $header := inputHeaders .Headers}}{{if $index}}, {{end}}{{$header.Name}}: string{{end}}): Promise<{{.OutputType}}> => {
   const token = localStorage.getItem("{{$authToken}}");
   {{if .URLParams}}let{{else}}const{{end}} url = '{{.Path}}'
   {{range .URLParams}}url = url.replace(':{{.}}', encodeURIComponent({{.}}))
@@ -93,24 +95,25 @@ export const {{.Name}}Query = async ({{if .URLParams}}{{range $index, $param := 
   }
 };
 
+
 {{if $.UseReactQuery}}
 // React Query hook
 {{if eq .Method "GET"}}
 export const use{{.Name}} = (
-  {{if .URLParams}}{{range $index, $param := .URLParams}}{{if $index}}, {{end}}{{$param}}: string{{end}}{{if or .InputType .Headers}}, {{end}}{{end}}{{if .InputType}}input: {{.InputType}}, {{end}}
-  {{range $index, $header := .Headers}}{{if $index}}, {{end}}{{$header.Name}}: string{{if not (eq . (last $.Headers))}}, {{end}}{{end}}{{if or .URLParams .InputType .Headers}}, {{end}}
+  {{if .URLParams}}{{range $index, $param := .URLParams}}{{if $index}}, {{end}}{{$param}}: string{{end}}{{if or .InputType (inputHeaders .Headers)}}, {{end}}{{end}}{{if .InputType}}input: {{.InputType}}{{if inputHeaders .Headers}}, {{end}}{{end}}
+  {{range $index, $header := inputHeaders .Headers}}{{if $index}}, {{end}}{{$header.Name}}: string{{end}}{{if or .URLParams .InputType (inputHeaders .Headers)}}, {{end}}
   options?: Omit<UseQueryOptions<{{.OutputType}}, APIError>, 'queryKey' | 'queryFn'>
 ) =>
   useQuery<{{.OutputType}}, APIError>({
-    queryKey: ['{{.Name}}'{{if .URLParams}}{{range .URLParams}}, {{.}}{{end}}{{end}}{{if .InputType}}, input{{end}}{{range .Headers}}, {{.Name}}{{end}}],
-    queryFn: () => {{.Name}}Query({{if .URLParams}}{{range $index, $param := .URLParams}}{{if $index}}, {{end}}{{$param}}{{end}}{{if and .URLParams .InputType}}, {{end}}{{end}}{{if .InputType}}input{{if .Headers}}, {{end}}{{end}}{{range $index, $header := .Headers}}{{if $index}}, {{end}}{{$header.Name}}{{end}}),
+    queryKey: ['{{.Name}}'{{if .URLParams}}{{range .URLParams}}, {{.}}{{end}}{{end}}{{if .InputType}}, input{{end}}{{range inputHeaders .Headers}}, {{.Name}}{{end}}],
+    queryFn: () => {{.Name}}Query({{if .URLParams}}{{range $index, $param := .URLParams}}{{if $index}}, {{end}}{{$param}}{{end}}{{if and .URLParams .InputType}}, {{end}}{{end}}{{if .InputType}}input{{if inputHeaders .Headers}}, {{end}}{{end}}{{range $index, $header := inputHeaders .Headers}}{{if $index}}, {{end}}{{$header.Name}}{{end}}),
     ...options,
   });	
 {{else}}
 export const use{{.Name}} = (
   {{range $index, $param := .URLParams}}{{if $index}}, {{end}}{{$param}}: string{{end}}
-  {{if .Headers}}{{if .URLParams}}, {{end}}{{range $index, $header := .Headers}}{{if $index}}, {{end}}{{$header.Name}}: string{{end}}{{end}}
-  {{if or .URLParams .Headers}}, {{end}}
+  {{if inputHeaders .Headers}}{{if .URLParams}}, {{end}}{{range $index, $header := inputHeaders .Headers}}{{if $index}}, {{end}}{{$header.Name}}: string{{end}}{{end}}
+  {{if or .URLParams (inputHeaders .Headers)}}, {{end}}
   options?: Omit<UseMutationOptions<{{.OutputType}}, APIError, {{if .InputType}}{{.InputType}}{{else}}void{{end}}>, 'mutationFn'>
 ) =>
   useMutation<{{.OutputType}}, APIError, {{if .InputType}}{{.InputType}}{{else}}void{{end}}>({
@@ -118,7 +121,7 @@ export const use{{.Name}} = (
       {{range $index, $param := .URLParams}}{{if $index}}, {{end}}{{$param}}{{end}}
       {{if and .URLParams .InputType}}, {{end}}
       {{if .InputType}}input{{end}}
-      {{if .Headers}}{{if or .URLParams .InputType}}, {{end}}{{range $index, $header := .Headers}}{{if $index}}, {{end}}{{$header.Name}}{{end}}{{end}}
+      {{if inputHeaders .Headers}}{{if or .URLParams .InputType}}, {{end}}{{range $index, $header := inputHeaders .Headers}}{{if $index}}, {{end}}{{$header.Name}}{{end}}{{end}}
     ),
     ...options,
   });
@@ -126,9 +129,9 @@ export const use{{.Name}} = (
 {{else if $.UseHooks}}
 // Custom React hook
 export const use{{.Name}} = (
-  {{if .URLParams}}{{range $index, $param := .URLParams}}{{if $index}}, {{end}}{{$param}}: string{{end}}{{if or .InputType .Headers}}, {{end}}{{end}}
-  {{if .InputType}}input: {{.InputType}}{{if .Headers}}, {{end}}{{end}}
-  {{range $index, $header := .Headers}}{{if $index}}, {{end}}{{$header.Name}}: string{{end}}
+  {{if .URLParams}}{{range $index, $param := .URLParams}}{{if $index}}, {{end}}{{$param}}: string{{end}}{{if or .InputType (inputHeaders .Headers)}}, {{end}}{{end}}
+  {{if .InputType}}input: {{.InputType}}{{if inputHeaders .Headers}}, {{end}}{{end}}
+  {{range $index, $header := inputHeaders .Headers}}{{if $index}}, {{end}}{{$header.Name}}: string{{end}}
 ) => {
   const [data, setData] = useState<{{.OutputType}} | null>(null);
   const [error, setError] = useState<APIError | null>(null);
@@ -138,9 +141,9 @@ export const use{{.Name}} = (
     setIsLoading(true);
     try {
       const result = await {{.Name}}Query(
-        {{if .URLParams}}{{range $index, $param := .URLParams}}{{if $index}}, {{end}}{{$param}}{{end}}{{if or .InputType .Headers}}, {{end}}{{end}}
-        {{if .InputType}}{{if eq .Method "GET"}}input{{else}}mutateInput || input{{end}}{{if .Headers}}, {{end}}{{end}}
-        {{range $index, $header := .Headers}}{{if $index}}, {{end}}{{$header.Name}}{{end}}
+        {{if .URLParams}}{{range $index, $param := .URLParams}}{{if $index}}, {{end}}{{$param}}{{end}}{{if or .InputType (inputHeaders .Headers)}}, {{end}}{{end}}
+        {{if .InputType}}{{if eq .Method "GET"}}input{{else}}mutateInput || input{{end}}{{if inputHeaders .Headers}}, {{end}}{{end}}
+        {{range $index, $header := inputHeaders .Headers}}{{if $index}}, {{end}}{{$header.Name}}{{end}}
       );
       setData(result);
       setError(null);
@@ -152,7 +155,7 @@ export const use{{.Name}} = (
     } finally {
       setIsLoading(false);
     }
-  }, [{{if .URLParams}}{{range $index, $param := .URLParams}}{{if $index}}, {{end}}{{$param}}{{end}}{{if or .InputType .Headers}}, {{end}}{{end}}{{if .InputType}}input{{if .Headers}}, {{end}}{{end}}{{range $index, $header := .Headers}}{{if $index}}, {{end}}{{$header.Name}}{{end}}]);
+  }, [{{if .URLParams}}{{range $index, $param := .URLParams}}{{if $index}}, {{end}}{{$param}}{{end}}{{if or .InputType (inputHeaders .Headers)}}, {{end}}{{end}}{{if .InputType}}input{{if inputHeaders .Headers}}, {{end}}{{end}}{{range $index, $header := inputHeaders .Headers}}{{if $index}}, {{end}}{{$header.Name}}{{end}}]);
 
   {{if eq .Method "GET"}}
   useEffect(() => {

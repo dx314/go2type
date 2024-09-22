@@ -19,6 +19,7 @@ import (
 	yaml "gopkg.in/yaml.v3"
 )
 
+// Config represents the configuration yaml file
 type Config struct {
 	AuthToken    string          `yaml:"auth_token"`
 	PrettierPath string          `yaml:"prettier_path"`
@@ -26,13 +27,13 @@ type Config struct {
 	Packages     []PackageConfig `yaml:"packages"`
 }
 
+// PackageConfig represents the configuration for a Go package
 type PackageConfig struct {
 	Path         string            `yaml:"path"`
 	OutputPath   string            `yaml:"output_path"`
 	TypeMappings map[string]string `yaml:"type_mappings"`
 }
 
-// New struct to hold header information
 type HeaderInfo struct {
 	Name   string
 	Source string // Can be "input", "localStorage", or "sessionStorage"
@@ -45,7 +46,7 @@ type HandlerInfo struct {
 	InputType  string
 	OutputType string
 	URLParams  []string
-	Headers    []HeaderInfo // Updated to use HeaderInfo instead of string
+	Headers    []HeaderInfo
 }
 
 type TypeInfo struct {
@@ -90,7 +91,6 @@ func main() {
 	}
 }
 
-// Version will be set during build time
 var Version = "v0.9.4"
 
 func printVersion() {
@@ -134,7 +134,7 @@ func initConfig() error {
 		Hooks:     "false",
 	}
 
-	// Find Go handlers
+	// Find Go handlers with @Method comments
 	packages, err := findGoHandlers(".")
 	if err != nil {
 		return fmt.Errorf("error finding Go handlers: %v", err)
@@ -629,6 +629,15 @@ func generateFile(types []TypeInfo, handlers []HandlerInfo, outputFile, authToke
 		},
 		"sub": func(a, b int) int {
 			return a - b
+		},
+		"inputHeaders": func(headers []HeaderInfo) []HeaderInfo {
+			var inputHeaders []HeaderInfo
+			for _, header := range headers {
+				if header.Source == "input" {
+					inputHeaders = append(inputHeaders, header)
+				}
+			}
+			return inputHeaders
 		},
 	}
 
