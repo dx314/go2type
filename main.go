@@ -161,6 +161,12 @@ func initConfig() error {
 	uniquePackages := make(map[string]PackageConfig)
 
 	for _, pkg := range packages {
+		pkg.TypeMappings = map[string]string{
+			"null.String":   "null | string",
+			"null.Bool":     "null | boolean",
+			"uuid.UUID":     "string /* uuid */",
+			"uuid.NullUUID": "null | string /* uuid */",
+		}
 		if existingPkg, ok := uniquePackages[pkg.Path]; ok {
 			// If the package already exists, just update the output path if it's empty
 			if existingPkg.OutputPath == "" {
