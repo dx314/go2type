@@ -642,6 +642,7 @@ func generateFile(types []TypeInfo, handlers []HandlerInfo, outputFile, authToke
 	defer file.Close()
 
 	data := TemplateData{
+		Version:       Version,
 		Timestamp:     time.Now().Format(time.RFC3339),
 		Types:         types,
 		Handlers:      handlers,
