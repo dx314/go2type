@@ -189,3 +189,7 @@ export const useGetUser = (
 MIT License
 
 Copyright (c) 2024 Alex Dunmow
+
+## Contributing
+
+Contributions are welcome! Please submit a pull request or open an issue to discuss potential changes.
