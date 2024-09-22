@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime/debug"
 	"strings"
 	"text/template"
 	"time"
@@ -77,12 +78,24 @@ func main() {
 			fmt.Printf("Error generating files: %v\n", err)
 			os.Exit(1)
 		}
+	case "version":
+		printVersion()
 	case "help":
 		printHelp()
 	default:
 		fmt.Printf("Unknown command: %s\n", command)
 		printHelp()
 		os.Exit(1)
+	}
+}
+
+// Version will be set during build time
+var Version = "dev"
+
+func printVersion() {
+	fmt.Printf("go2type version %s\n", Version)
+	if info, ok := debug.ReadBuildInfo(); ok {
+		fmt.Printf("go version: %s\n", info.GoVersion)
 	}
 }
 
