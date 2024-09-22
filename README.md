@@ -17,6 +17,7 @@ The generator can produce standard query functions, React hooks, or React Query 
   - React hooks
   - React Query hooks
 - Customizable type mappings
+- Automatically parse time.Time as Date objects
 - Prettier formatting support
 - Automatic configuration initialization
 
@@ -76,6 +77,10 @@ prettier_path: "path/to/prettier"
 
 # Hook generation mode: "false" (standard), "true" (React hooks), or "react-query"
 hooks: "false"
+
+# Use Date objects for time.Time fields, defaults to false
+# Adds a date parsing function to the generated API client
+use_date_object: true
 
 # List of packages to process
 packages:

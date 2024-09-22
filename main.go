@@ -21,10 +21,11 @@ import (
 
 // Config represents the configuration yaml file
 type Config struct {
-	AuthToken    string          `yaml:"auth_token"`
-	PrettierPath string          `yaml:"prettier_path"`
-	Hooks        string          `yaml:"hooks"`
-	Packages     []PackageConfig `yaml:"packages"`
+	AuthToken     string          `yaml:"auth_token"`
+	PrettierPath  string          `yaml:"prettier_path"`
+	Hooks         string          `yaml:"hooks"`
+	UseDateObject bool            `yaml:"use_date_object"`
+	Packages      []PackageConfig `yaml:"packages"`
 }
 
 // PackageConfig represents the configuration for a Go package
@@ -75,7 +76,7 @@ func main() {
 			os.Exit(1)
 		}
 	case "generate":
-		if err := generate(); err != nil {
+		if err := generate(true); err != nil {
 			fmt.Printf("Error generating files: %v\n", err)
 			os.Exit(1)
 		}
@@ -293,7 +294,7 @@ func findGoHandlers(root string) ([]PackageConfig, error) {
 	return packages, err
 }
 
-func generate() error {
+func generate(shouldFormat bool) error {
 	config, err := loadConfig("go2type.yaml")
 	if err != nil {
 		return fmt.Errorf("error loading config: %v", err)
@@ -306,7 +307,7 @@ func generate() error {
 			continue
 		}
 
-		types, handlers, err := parsePackage(absPath, pkg.TypeMappings)
+		types, handlers, err := parsePackage(absPath, pkg.TypeMappings, config.UseDateObject)
 		if err != nil {
 			fmt.Printf("Error parsing package %s: %v\n", pkg.Path, err)
 			continue
@@ -315,12 +316,122 @@ func generate() error {
 		useHooks := config.Hooks == "true" || config.Hooks == "react-query"
 		useReactQuery := config.Hooks == "react-query"
 
-		if err := generateFile(types, handlers, pkg.OutputPath, config.AuthToken, config.PrettierPath, useHooks, useReactQuery); err != nil {
+		opts := GenerateFileOptions{
+			Types:         types,
+			Handlers:      handlers,
+			OutputFile:    pkg.OutputPath,
+			AuthToken:     config.AuthToken,
+			PrettierPath:  config.PrettierPath,
+			UseHooks:      useHooks,
+			UseReactQuery: useReactQuery,
+			ShouldFormat:  shouldFormat,
+			UseDateObject: config.UseDateObject,
+		}
+
+		if err := generateFile(opts); err != nil {
 			fmt.Printf("Error generating file for package %s: %v\n", pkg.Path, err)
 			continue
 		}
 
 		fmt.Printf("Generated file for package %s at %s\n", pkg.Path, pkg.OutputPath)
+	}
+
+	return nil
+}
+
+type TemplatePiece struct {
+	Tmpl   string
+	Render bool
+}
+
+// GenerateFileOptions contains all the options for generating a file
+type GenerateFileOptions struct {
+	Types         []TypeInfo
+	Handlers      []HandlerInfo
+	OutputFile    string
+	AuthToken     string
+	PrettierPath  string
+	UseHooks      bool
+	UseReactQuery bool
+	ShouldFormat  bool
+	UseDateObject bool
+}
+
+func generateFile(opts GenerateFileOptions) error {
+	dir := filepath.Dir(opts.OutputFile)
+	if err := os.MkdirAll(dir, os.ModePerm); err != nil {
+		return fmt.Errorf("error creating directory: %v", err)
+	}
+
+	funcMap := template.FuncMap{
+		"last": func(x interface{}) interface{} {
+			v := reflect.ValueOf(x)
+			return v.Index(v.Len() - 1).Interface()
+		},
+		"sub": func(a, b int) int {
+			return a - b
+		},
+		"inputHeaders": func(headers []HeaderInfo) []HeaderInfo {
+			var inputHeaders []HeaderInfo
+			for _, header := range headers {
+				if header.Source == "input" {
+					inputHeaders = append(inputHeaders, header)
+				}
+			}
+			return inputHeaders
+		},
+	}
+
+	file, err := os.Create(opts.OutputFile)
+	if err != nil {
+		return fmt.Errorf("error creating file: %v", err)
+	}
+	defer file.Close()
+
+	data := TemplateData{
+		Version:       Version,
+		Timestamp:     time.Now().Format(time.RFC3339),
+		Types:         opts.Types,
+		Handlers:      opts.Handlers,
+		AuthToken:     opts.AuthToken,
+		UseHooks:      opts.UseHooks,
+		UseReactQuery: opts.UseReactQuery,
+		UseDateObject: opts.UseDateObject,
+	}
+
+	// Create a new template and add the helper functions
+	tmpl := template.New("typescript").Funcs(funcMap)
+
+	// Define the order of template pieces
+	templatePieces := []TemplatePiece{
+		{Tmpl: headerTemplate, Render: true},
+		{Tmpl: typesTemplate, Render: true},
+		{Tmpl: queryFunctionTemplate, Render: true},
+		{Tmpl: reactQueryHookTemplate, Render: opts.UseReactQuery},
+		{Tmpl: reactHookTemplate, Render: opts.UseHooks && !opts.UseReactQuery},
+		{Tmpl: queryDictionaryTemplate, Render: true},
+	}
+
+	// Parse and execute each template piece
+	for _, piece := range templatePieces {
+		if !piece.Render {
+			continue // Skip pieces that should not be rendered
+		}
+		t, err := tmpl.Parse(piece.Tmpl)
+		if err != nil {
+			return fmt.Errorf("error parsing template piece: %v", err)
+		}
+
+		if err := t.Execute(file, data); err != nil {
+			return fmt.Errorf("error executing template piece: %v", err)
+		}
+	}
+
+	if opts.ShouldFormat {
+		// Format the generated code
+		if err := formatCode(opts.OutputFile, opts.PrettierPath); err != nil {
+			fmt.Printf("Warning: Failed to format %s: %v\n", opts.OutputFile, err)
+		}
 	}
 
 	return nil
@@ -345,7 +456,7 @@ func (tr *TypeRegistry) GetType(name string) (TypeInfo, bool) {
 	return t, ok
 }
 
-func parsePackage(packagePath string, customTypeMappings map[string]string) ([]TypeInfo, []HandlerInfo, error) {
+func parsePackage(packagePath string, customTypeMappings map[string]string, useDateObject bool) ([]TypeInfo, []HandlerInfo, error) {
 	// Merge default and custom type mappings
 	typeMappings := make(map[string]string)
 	for k, v := range defaultTypeMappings {
@@ -353,6 +464,11 @@ func parsePackage(packagePath string, customTypeMappings map[string]string) ([]T
 	}
 	for k, v := range customTypeMappings {
 		typeMappings[k] = v
+	}
+	if useDateObject {
+		typeMappings["time.Time"] = "Date"
+	} else {
+		typeMappings["time.Time"] = "string /* date-time */"
 	}
 
 	fset := token.NewFileSet()
@@ -446,9 +562,6 @@ func parseFieldType(expr ast.Expr, typeMappings map[string]string) string {
 		fullType := fmt.Sprintf("%s.%s", t.X, t.Sel)
 		if mappedType, ok := typeMappings[fullType]; ok {
 			return mappedType
-		}
-		if fullType == "time.Time" {
-			return "Date"
 		}
 		return fullType
 	default:
@@ -614,64 +727,6 @@ func formatHookName(name string) string {
 	r := []rune(name)
 	r[0] = unicode.ToUpper(r[0])
 	return string(r)
-}
-
-func generateFile(types []TypeInfo, handlers []HandlerInfo, outputFile, authToken, prettierPath string, useHooks, useReactQuery bool) error {
-	dir := filepath.Dir(outputFile)
-	if err := os.MkdirAll(dir, os.ModePerm); err != nil {
-		return fmt.Errorf("error creating directory: %v", err)
-	}
-
-	funcMap := template.FuncMap{
-		"last": func(x interface{}) interface{} {
-			v := reflect.ValueOf(x)
-			return v.Index(v.Len() - 1).Interface()
-		},
-		"sub": func(a, b int) int {
-			return a - b
-		},
-		"inputHeaders": func(headers []HeaderInfo) []HeaderInfo {
-			var inputHeaders []HeaderInfo
-			for _, header := range headers {
-				if header.Source == "input" {
-					inputHeaders = append(inputHeaders, header)
-				}
-			}
-			return inputHeaders
-		},
-	}
-
-	tmpl, err := template.New("file").Funcs(funcMap).Parse(fileTemplate)
-	if err != nil {
-		return fmt.Errorf("error parsing template: %v", err)
-	}
-
-	file, err := os.Create(outputFile)
-	if err != nil {
-		return fmt.Errorf("error creating file: %v", err)
-	}
-	defer file.Close()
-
-	data := TemplateData{
-		Version:       Version,
-		Timestamp:     time.Now().Format(time.RFC3339),
-		Types:         types,
-		Handlers:      handlers,
-		AuthToken:     authToken,
-		UseHooks:      useHooks,
-		UseReactQuery: useReactQuery,
-	}
-
-	if err := tmpl.Execute(file, data); err != nil {
-		return fmt.Errorf("error executing template: %v", err)
-	}
-
-	// Format the generated code
-	if err := formatCode(outputFile, prettierPath); err != nil {
-		fmt.Printf("Warning: Failed to format %s: %v\n", outputFile, err)
-	}
-
-	return nil
 }
 
 var defaultTypeMappings = map[string]string{
