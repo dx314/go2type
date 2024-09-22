@@ -6,10 +6,12 @@ import (
 	"go/parser"
 	"go/token"
 	"io/ioutil"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"runtime/debug"
 	"strings"
 	"text/template"
@@ -36,8 +38,9 @@ type PackageConfig struct {
 }
 
 type HeaderInfo struct {
-	Name   string
-	Source string // Can be "input", "localStorage", or "sessionStorage"
+	OriginalName string
+	SafeName     string
+	Source       string
 }
 
 type HandlerInfo struct {
@@ -372,13 +375,13 @@ func generateFile(opts GenerateFileOptions) error {
 			return a - b
 		},
 		"inputHeaders": func(headers []HeaderInfo) []HeaderInfo {
-			var inputHeaders []HeaderInfo
-			for _, header := range headers {
-				if header.Source == "input" {
-					inputHeaders = append(inputHeaders, header)
+			var result []HeaderInfo
+			for _, h := range headers {
+				if h.Source == "input" {
+					result = append(result, h)
 				}
 			}
-			return inputHeaders
+			return result
 		},
 	}
 
@@ -415,7 +418,7 @@ func generateFile(opts GenerateFileOptions) error {
 	// Parse and execute each template piece
 	for _, piece := range templatePieces {
 		if !piece.Render {
-			continue // Skip pieces that should not be rendered
+			continue
 		}
 		t, err := tmpl.Parse(piece.Tmpl)
 		if err != nil {
@@ -423,6 +426,7 @@ func generateFile(opts GenerateFileOptions) error {
 		}
 
 		if err := t.Execute(file, data); err != nil {
+			log.Printf("Error executing template: %v", err)
 			return fmt.Errorf("error executing template piece: %v", err)
 		}
 	}
@@ -472,7 +476,7 @@ func parsePackage(packagePath string, customTypeMappings map[string]string, useD
 	}
 
 	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, packagePath, nil, parser.ParseComments)
+	packages, err := parser.ParseDir(fset, packagePath, nil, parser.ParseComments)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error parsing directory: %v", err)
 	}
@@ -480,14 +484,14 @@ func parsePackage(packagePath string, customTypeMappings map[string]string, useD
 	registry := newTypeRegistry()
 	var handlers []HandlerInfo
 
-	// First pass: collect all type definitions
-	for _, pkg := range pkgs {
+	for _, pkg := range packages {
 		for _, file := range pkg.Files {
 			ast.Inspect(file, func(n ast.Node) bool {
 				switch node := n.(type) {
 				case *ast.TypeSpec:
 					if structType, ok := node.Type.(*ast.StructType); ok {
-						registry.AddType(parseType(node.Name.Name, structType, typeMappings))
+						typeInfo := parseType(node.Name.Name, structType, typeMappings)
+						registry.AddType(typeInfo)
 					}
 				case *ast.FuncDecl:
 					if node.Doc != nil {
@@ -501,23 +505,65 @@ func parsePackage(packagePath string, customTypeMappings map[string]string, useD
 		}
 	}
 
-	// Second pass: resolve nested types
-	for name, typeInfo := range registry.Types {
-		resolvedFields := resolveNestedTypes(typeInfo.Fields, registry, typeMappings)
-		typeInfo.Fields = resolvedFields
-		registry.Types[name] = typeInfo
-	}
-
-	// Convert registry to slice and filter used types
+	// Convert registry to slice
 	var allTypes []TypeInfo
 	for _, t := range registry.Types {
 		allTypes = append(allTypes, t)
 	}
+
+	// Filter types to include only those used in handlers
 	usedTypes := filterUsedTypes(allTypes, handlers)
 
 	return usedTypes, handlers, nil
 }
 
+func filterUsedTypes(allTypes []TypeInfo, handlers []HandlerInfo) []TypeInfo {
+	usedTypeSet := make(map[string]bool)
+	var queue []string
+
+	// Initialize the queue with types directly used in handlers
+	for _, handler := range handlers {
+		if handler.InputType != "" {
+			queue = append(queue, handler.InputType)
+		}
+		if handler.OutputType != "" {
+			queue = append(queue, handler.OutputType)
+		}
+	}
+
+	// Process the queue
+	for len(queue) > 0 {
+		typeName := queue[0]
+		queue = queue[1:]
+
+		if !usedTypeSet[typeName] {
+			usedTypeSet[typeName] = true
+
+			// Find the type and add its nested types to the queue
+			for _, t := range allTypes {
+				if t.Name == typeName {
+					for _, field := range t.Fields {
+						fieldType := strings.TrimSuffix(strings.TrimPrefix(field.Type, "Array<"), ">")
+						if !usedTypeSet[fieldType] {
+							queue = append(queue, fieldType)
+						}
+					}
+					break
+				}
+			}
+		}
+	}
+
+	// Filter types based on the used type set
+	var usedTypes []TypeInfo
+	for _, t := range allTypes {
+		if usedTypeSet[t.Name] {
+			usedTypes = append(usedTypes, t)
+		}
+	}
+
+	return usedTypes
+}
 func parseType(name string, structType *ast.StructType, typeMappings map[string]string) TypeInfo {
 	var fields []FieldInfo
 	for _, field := range structType.Fields.List {
@@ -598,54 +644,6 @@ func resolveNestedTypes(fields []FieldInfo, registry *TypeRegistry, typeMappings
 	return resolvedFields
 }
 
-func filterUsedTypes(allTypes []TypeInfo, handlers []HandlerInfo) []TypeInfo {
-	usedTypeSet := make(map[string]bool)
-	var queue []string
-
-	// Initialize the queue with types directly used in handlers
-	for _, handler := range handlers {
-		if handler.InputType != "" {
-			queue = append(queue, handler.InputType)
-		}
-		if handler.OutputType != "" {
-			queue = append(queue, handler.OutputType)
-		}
-	}
-
-	// Process the queue
-	for len(queue) > 0 {
-		typeName := queue[0]
-		queue = queue[1:]
-
-		if !usedTypeSet[typeName] {
-			usedTypeSet[typeName] = true
-
-			// Find the type and add its nested types to the queue
-			for _, t := range allTypes {
-				if t.Name == typeName {
-					for _, field := range t.Fields {
-						fieldType := strings.TrimSuffix(strings.TrimPrefix(field.Type, "Array<"), ">")
-						if !usedTypeSet[fieldType] {
-							queue = append(queue, fieldType)
-						}
-					}
-					break
-				}
-			}
-		}
-	}
-
-	// Filter types based on the used type set
-	var usedTypes []TypeInfo
-	for _, t := range allTypes {
-		if usedTypeSet[t.Name] {
-			usedTypes = append(usedTypes, t)
-		}
-	}
-
-	return usedTypes
-}
-
 func getJSONTag(tag *ast.BasicLit) string {
 	if tag == nil {
 		return ""
@@ -702,23 +700,39 @@ func parseHandlerComments(fn *ast.FuncDecl) *HandlerInfo {
 	return nil
 }
 
+func toTypescriptSafeHeader(s string) string {
+	// Convert to lowercase
+	s = strings.ToLower(s)
+
+	// Replace hyphens with underscores
+	s = strings.ReplaceAll(s, "-", "_")
+
+	// Remove any character that's not a letter, number, or underscore
+	reg := regexp.MustCompile("[^a-z0-9_]+")
+	s = reg.ReplaceAllString(s, "")
+
+	// Ensure it doesn't start with a number
+	if len(s) > 0 && s[0] >= '0' && s[0] <= '9' {
+		s = "_" + s
+	}
+
+	return s
+}
+
 func parseHeaderDirective(directive string) HeaderInfo {
 	parts := strings.Split(directive, ":")
-	if len(parts) == 1 {
+	if len(parts) == 2 {
 		return HeaderInfo{
-			Name:   parts[0],
-			Source: "input",
-		}
-	} else if len(parts) == 2 {
-		return HeaderInfo{
-			Name:   parts[1],
-			Source: parts[0],
+			OriginalName: parts[1],
+			SafeName:     toTypescriptSafeHeader(parts[1]),
+			Source:       parts[0],
 		}
 	}
 	// If the directive is not in the expected format, default to input
 	return HeaderInfo{
-		Name:   directive,
-		Source: "input",
+		OriginalName: directive,
+		SafeName:     toTypescriptSafeHeader(directive),
+		Source:       "input",
 	}
 }
 
