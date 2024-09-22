@@ -144,7 +144,7 @@ export const use{{.Name}} = (
 const reactHookTemplate = `{{range .Handlers}}
 // Custom React hook
 export const use{{.Name}} = (
-  {{if .InputType}}input: {{.InputType}},{{end}}
+  {{if eq .Method "GET"}}{{if .InputType}}input: {{.InputType}}{{end}}{{if inputHeaders .Headers}}, {{end}}{{end}}
   {{if .URLParams}}{{range $index, $param := .URLParams}}{{if $index}}, {{end}}{{$param}}: string{{end}}{{if or .InputType (inputHeaders .Headers)}}, {{end}}{{end}}
   {{range $index, $header := inputHeaders .Headers}}{{if $index}}, {{end}}{{$header.SafeName}}: string{{end}}
 ) => {
@@ -152,7 +152,7 @@ export const use{{.Name}} = (
   const [error, setError] = useState<APIError | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  const {{if eq .Method "GET"}}query{{else}}mutate{{end}} = useCallback(async () => {
+  const {{if eq .Method "GET"}}query = useCallback(async () => {{ "{" }}{{else}}mutate = useCallback(async ({{if .InputType}}input: {{.InputType}},{{end}}) => {{ "{" }}{{end}}
     setIsLoading(true);
     try {
       const result = await {{.Name}}Query(
@@ -170,7 +170,7 @@ export const use{{.Name}} = (
     } finally {
       setIsLoading(false);
     }
-  }, [{{if .URLParams}}{{range $index, $param := .URLParams}}{{if $index}}, {{end}}{{$param}}{{end}}{{if or .InputType (inputHeaders .Headers)}}, {{end}}{{end}}{{if .InputType}}input{{if inputHeaders .Headers}}, {{end}}{{end}}{{range $index, $header := inputHeaders .Headers}}{{if $index}}, {{end}}{{$header.SafeName}}{{end}}]);
+  }, [{{if .URLParams}}{{range $index, $param := .URLParams}}{{if $index}}, {{end}}{{$param}}{{end}}{{if or .InputType (inputHeaders .Headers)}}, {{end}}{{end}}{{if and .InputType (eq .Method "GET")}}input{{if inputHeaders .Headers}}, {{end}}{{end}}{{range $index, $header := inputHeaders .Headers}}{{if $index}}, {{end}}{{$header.SafeName}}{{end}}]);
 
   {{if eq .Method "GET"}}
   useEffect(() => {
