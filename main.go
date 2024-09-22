@@ -95,7 +95,7 @@ func main() {
 	}
 }
 
-var Version = "v0.9.5"
+var Version = "v0.9.6"
 
 func printVersion() {
 	fmt.Printf("go2type version %s\n", Version)
