@@ -42,7 +42,6 @@ const typesTemplate = `{{range .Types}}export type {{.Name}} = { {{range .Fields
 const queryFunctionTemplate = `{{$authToken := .AuthToken}}
 {{$useDateObject := .UseDateObject}}
 {{range .Handlers}}
-// Separate query function
 export const {{.Name}}Query = async ({{if .URLParams}}{{range $index, $param := .URLParams}}{{if $index}}, {{end}}{{$param}}: string{{end}}{{if or .InputType (inputHeaders .Headers)}}, {{end}}{{end}}{{if .InputType}}input: {{.InputType}}{{if inputHeaders .Headers}}, {{end}}{{end}}{{range $index, $header := inputHeaders .Headers}}{{if $index}}, {{end}}{{$header.SafeName}}: string{{end}}): Promise<{{.OutputType}}> => {
   const token = localStorage.getItem("{{$authToken}}");
   {{if .URLParams}}let{{else}}const{{end}} url = '{{.Path}}'
@@ -145,20 +144,20 @@ export const use{{.Name}} = (
 const reactHookTemplate = `{{range .Handlers}}
 // Custom React hook
 export const use{{.Name}} = (
+  {{if .InputType}}input: {{.InputType}},{{end}}
   {{if .URLParams}}{{range $index, $param := .URLParams}}{{if $index}}, {{end}}{{$param}}: string{{end}}{{if or .InputType (inputHeaders .Headers)}}, {{end}}{{end}}
-  {{if .InputType}}input: {{.InputType}}{{if inputHeaders .Headers}}, {{end}}{{end}}
   {{range $index, $header := inputHeaders .Headers}}{{if $index}}, {{end}}{{$header.SafeName}}: string{{end}}
 ) => {
   const [data, setData] = useState<{{.OutputType}} | null>(null);
   const [error, setError] = useState<APIError | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  const {{if eq .Method "GET"}}query{{else}}mutate{{end}} = useCallback(async ({{if and (ne .Method "GET") .InputType}}mutateInput?: {{.InputType}}{{end}}) => {
+  const {{if eq .Method "GET"}}query{{else}}mutate{{end}} = useCallback(async () => {
     setIsLoading(true);
     try {
       const result = await {{.Name}}Query(
         {{if .URLParams}}{{range $index, $param := .URLParams}}{{if $index}}, {{end}}{{$param}}{{end}}{{if or .InputType (inputHeaders .Headers)}}, {{end}}{{end}}
-        {{if .InputType}}{{if eq .Method "GET"}}input{{else}}mutateInput || input{{end}}{{if inputHeaders .Headers}}, {{end}}{{end}}
+        {{if .InputType}}input{{end}}{{if inputHeaders .Headers}}, {{end}}
         {{range $index, $header := inputHeaders .Headers}}{{if $index}}, {{end}}{{$header.SafeName}}{{end}}
       );
       setData(result);

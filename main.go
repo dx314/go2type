@@ -343,6 +343,7 @@ func generate(shouldFormat bool) error {
 }
 
 type TemplatePiece struct {
+	Name   string
 	Tmpl   string
 	Render bool
 }
@@ -407,12 +408,12 @@ func generateFile(opts GenerateFileOptions) error {
 
 	// Define the order of template pieces
 	templatePieces := []TemplatePiece{
-		{Tmpl: headerTemplate, Render: true},
-		{Tmpl: typesTemplate, Render: true},
-		{Tmpl: queryFunctionTemplate, Render: true},
-		{Tmpl: reactQueryHookTemplate, Render: opts.UseReactQuery},
-		{Tmpl: reactHookTemplate, Render: opts.UseHooks && !opts.UseReactQuery},
-		{Tmpl: queryDictionaryTemplate, Render: true},
+		{Name: "headerTemplate", Tmpl: headerTemplate, Render: true},
+		{Name: "typesTemplate", Tmpl: typesTemplate, Render: true},
+		{Name: "queryFunctionTemplate", Tmpl: queryFunctionTemplate, Render: true},
+		{Name: "reactQueryHookTemplate", Tmpl: reactQueryHookTemplate, Render: opts.UseReactQuery},
+		{Name: "reactHookTemplate", Tmpl: reactHookTemplate, Render: opts.UseHooks && !opts.UseReactQuery},
+		{Name: "queryDictionaryTemplate", Tmpl: queryDictionaryTemplate, Render: true},
 	}
 
 	// Parse and execute each template piece
@@ -422,12 +423,12 @@ func generateFile(opts GenerateFileOptions) error {
 		}
 		t, err := tmpl.Parse(piece.Tmpl)
 		if err != nil {
-			return fmt.Errorf("error parsing template piece: %v", err)
+			return fmt.Errorf("error parsing template piece %s: %v", piece.Name, err)
 		}
 
 		if err := t.Execute(file, data); err != nil {
-			log.Printf("Error executing template: %v", err)
-			return fmt.Errorf("error executing template piece: %v", err)
+			log.Printf("Error executing template: %s: %v", piece.Name, err)
+			return fmt.Errorf("error executing template piece: %s: %v", piece.Name, err)
 		}
 	}
 
