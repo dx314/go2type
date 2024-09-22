@@ -84,6 +84,7 @@ func main() {
 		printHelp()
 	default:
 		fmt.Printf("Unknown command: %s\n", command)
+		printVersion()
 		printHelp()
 		os.Exit(1)
 	}
@@ -104,6 +105,7 @@ func printHelp() {
 	fmt.Println("Available commands:")
 	fmt.Println("  init      Initialize a new configuration file")
 	fmt.Println("  generate  Generate TypeScript files based on the configuration")
+	fmt.Println("  version   Print the version of go2type")
 	fmt.Println("  help      Print this help message")
 }
 
