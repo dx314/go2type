@@ -129,7 +129,7 @@ func printVersion() {
 
 	if latestVer.GreaterThan(currentVer) {
 		fmt.Printf("A new version is available: %s\n", latestVersion)
-		fmt.Println("You can update by visiting: https://github.com/dx314/go2type/releases")
+		fmt.Println("You can update by running: go install github.com/dx314/go2type@" + latestVersion)
 	} else {
 		fmt.Println("You are using the latest version.")
 	}
