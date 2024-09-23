@@ -95,10 +95,7 @@ func TestParsePackage(t *testing.T) {
 	defer func() {
 		if !t.Failed() {
 			t.Logf("Cleaning up temporary directory: %s", tmpdir)
-			err := os.RemoveAll(tmpdir)
-			if err != nil {
-				t.Logf("Failed to clean up temporary directory: %v", err)
-			}
+			_ = os.RemoveAll(tmpdir)
 		} else {
 			t.Logf("Test failed. Temporary directory retained at: %s", tmpdir)
 		}

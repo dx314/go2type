@@ -6,7 +6,7 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
-	"io/ioutil"
+	"golang.org/x/text/language"
 	"log"
 	"os"
 	"os/exec"
@@ -19,6 +19,7 @@ import (
 	"time"
 	"unicode"
 
+	cases "golang.org/x/text/cases"
 	packages "golang.org/x/tools/go/packages"
 	yaml "gopkg.in/yaml.v3"
 )
@@ -116,7 +117,7 @@ func printHelp() {
 }
 
 func loadConfig(filename string) (*Config, error) {
-	data, err := ioutil.ReadFile(filename)
+	data, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +142,7 @@ func initConfig() error {
 	}
 
 	// Find Go handlers with @Method comments
-	packages, err := findGoHandlers(".")
+	cfgPackages, err := findGoHandlers(".")
 	if err != nil {
 		return fmt.Errorf("error finding Go handlers: %v", err)
 	}
@@ -181,7 +182,7 @@ func initConfig() error {
 	// Use a map to prevent duplicate package entries
 	uniquePackages := make(map[string]PackageConfig)
 
-	for _, pkg := range packages {
+	for _, pkg := range cfgPackages {
 		pkg.TypeMappings = map[string]string{
 			"null.String":   "null | string",
 			"null.Bool":     "null | boolean",
@@ -213,7 +214,7 @@ func initConfig() error {
 		return fmt.Errorf("error marshaling config: %v", err)
 	}
 
-	if err := ioutil.WriteFile("go2type.yaml", data, 0644); err != nil {
+	if err := os.WriteFile("go2type.yaml", data, 0644); err != nil {
 		return fmt.Errorf("error writing config file: %v", err)
 	}
 
@@ -258,7 +259,7 @@ func findNodeModules() (string, string, error) {
 }
 
 func findGoHandlers(root string) ([]PackageConfig, error) {
-	var packages []PackageConfig
+	var goPackages []PackageConfig
 
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -281,7 +282,7 @@ func findGoHandlers(root string) ([]PackageConfig, error) {
 					if fn.Doc != nil {
 						for _, comment := range fn.Doc.List {
 							if strings.Contains(comment.Text, "@Method") {
-								packages = append(packages, PackageConfig{
+								goPackages = append(goPackages, PackageConfig{
 									Path:         filepath.Dir(path),
 									TypeMappings: make(map[string]string),
 								})
@@ -296,7 +297,7 @@ func findGoHandlers(root string) ([]PackageConfig, error) {
 		return nil
 	})
 
-	return packages, err
+	return goPackages, err
 }
 
 func generate(shouldFormat bool) error {
@@ -312,7 +313,7 @@ func generate(shouldFormat bool) error {
 			continue
 		}
 
-		types, handlers, err := parsePackage(absPath, pkg.TypeMappings, config.UseDateObject)
+		pkgTypes, handlers, err := parsePackage(absPath, pkg.TypeMappings, config.UseDateObject)
 		if err != nil {
 			fmt.Printf("Error parsing package %s: %v\n", pkg.Path, err)
 			continue
@@ -322,7 +323,7 @@ func generate(shouldFormat bool) error {
 		useReactQuery := config.Hooks == "react-query"
 
 		opts := GenerateFileOptions{
-			Types:         types,
+			Types:         pkgTypes,
 			Handlers:      handlers,
 			OutputFile:    pkg.OutputPath,
 			AuthToken:     config.AuthToken,
@@ -392,7 +393,12 @@ func generateFile(opts GenerateFileOptions) error {
 	if err != nil {
 		return fmt.Errorf("error creating file: %v", err)
 	}
-	defer file.Close()
+	defer func() {
+		err := file.Close()
+		if err != nil {
+			log.Printf("Error closing file: %v", err)
+		}
+	}()
 
 	data := TemplateData{
 		Version:       Version,
@@ -579,7 +585,7 @@ func resolveNestedAndExternalTypes(t *TypeInfo, registry *TypeRegistry, currentP
 				}
 
 				// Rename the type if there's a clash
-				newTypeName := fmt.Sprintf("%s%s", strings.Title(packageName), typeName)
+				newTypeName := fmt.Sprintf("%s%s", cases.Title(language.Und, cases.NoLower).String(packageName), typeName)
 				t.Fields[i].Type = newTypeName
 
 				// Add the internal type to the registry
