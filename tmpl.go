@@ -144,9 +144,9 @@ const reactQueryHookTemplate = `{{range .Handlers}}
 export const use{{.Name}} = (
   {{if .URLParams}}{{range $index, $param := .URLParams}}{{if $index}}, {{end}}{{$param}}: string{{end}}{{if or .InputType (inputHeaders .Headers)}}, {{end}}{{end}}{{if .InputType}}input: {{.InputType}}{{if inputHeaders .Headers}}, {{end}}{{end}}
   {{range $index, $header := inputHeaders .Headers}}{{if $index}}, {{end}}{{$header.SafeName}}: string{{end}}{{if or .URLParams .InputType (inputHeaders .Headers)}}, {{end}}
-  options?: Omit<UseQueryOptions<{{.OutputType}}, APIError>, 'queryKey' | 'queryFn'>
+  options?: Omit<UseQueryOptions<{{.OutputType}}, APIError, {{.OutputType}}, [string{{if .URLParams}}{{range .URLParams}}, string{{end}}{{end}}{{if .InputType}}, {{.InputType}}{{end}}{{range inputHeaders .Headers}}, string{{end}}]>, 'queryKey' | 'queryFn'>
 ): UseQueryResult<{{.OutputType}}, APIError> =>
-  useQuery<{{.OutputType}}, APIError>({
+  useQuery<{{.OutputType}}, APIError, {{.OutputType}}, [string{{if .URLParams}}{{range .URLParams}}, string{{end}}{{end}}{{if .InputType}}, {{.InputType}}{{end}}{{range inputHeaders .Headers}}, string{{end}}]>({
     queryKey: ['{{.Name}}'{{if .URLParams}}{{range .URLParams}}, {{.}}{{end}}{{end}}{{if .InputType}}, input{{end}}{{range inputHeaders .Headers}}, {{.SafeName}}{{end}}],
     queryFn: () => {{.Name}}Query({{if .URLParams}}{{range $index, $param := .URLParams}}{{if $index}}, {{end}}{{$param}}{{end}}{{if and .URLParams .InputType}}, {{end}}{{end}}{{if .InputType}}input{{if inputHeaders .Headers}}, {{end}}{{end}}{{range $index, $header := inputHeaders .Headers}}{{if $index}}, {{end}}{{$header.SafeName}}{{end}}),
     ...options,
@@ -156,9 +156,9 @@ export const use{{.Name}} = (
   {{range $index, $param := .URLParams}}{{if $index}}, {{end}}{{$param}}: string{{end}}
   {{if inputHeaders .Headers}}{{if .URLParams}}, {{end}}{{range $index, $header := inputHeaders .Headers}}{{if $index}}, {{end}}{{$header.SafeName}}: string{{end}}{{end}}
   {{if or .URLParams (inputHeaders .Headers)}}, {{end}}
-  options?: Omit<UseMutationOptions<{{.OutputType}}, APIError, {{if .InputType}}{{.InputType}}{{else}}void{{end}}>, 'mutationFn'>
-): UseMutationResult<{{.OutputType}}, APIError, {{if .InputType}}{{.InputType}}{{else}}void{{end}}> =>
-  useMutation<{{.OutputType}}, APIError, {{if .InputType}}{{.InputType}}{{else}}void{{end}}>({
+  options?: Omit<UseMutationOptions<{{.OutputType}}, APIError, {{if .InputType}}{{.InputType}}{{else}}void{{end}}, unknown>, 'mutationFn'>
+): UseMutationResult<{{.OutputType}}, APIError, {{if .InputType}}{{.InputType}}{{else}}void{{end}}, unknown> =>
+  useMutation<{{.OutputType}}, APIError, {{if .InputType}}{{.InputType}}{{else}}void{{end}}, unknown>({
     mutationFn: ({{if .InputType}}input{{end}}) => {{.Name}}Query(
       {{range $index, $param := .URLParams}}{{if $index}}, {{end}}{{$param}}{{end}}
       {{if and .URLParams .InputType}}, {{end}}
