@@ -40,44 +40,37 @@ const typesTemplate = `{{range .Types}}export type {{.Name}} = { {{range .Fields
 `
 
 const queryFunctionTemplate = `{{$authToken := .AuthToken}}
+{{$authToken := .AuthToken}}
 {{$useDateObject := .UseDateObject}}
-{{range .Handlers}}
-export const {{.Name}}Query = async ({{if .URLParams}}{{range $index, $param := .URLParams}}{{if $index}}, {{end}}{{$param}}: string{{end}}{{if or .InputType (inputHeaders .Headers)}}, {{end}}{{end}}{{if .InputType}}input: {{.InputType}}{{if inputHeaders .Headers}}, {{end}}{{end}}{{range $index, $header := inputHeaders .Headers}}{{if $index}}, {{end}}{{$header.SafeName}}: string{{end}}): Promise<{{.OutputType}}> => {
+
+// Generic query factory
+async function createQuery<TInput, TOutput>(
+  method: string,
+  url: string,
+  input?: TInput,
+  headers: Record<string, string> = {}
+): Promise<TOutput> {
   const token = localStorage.getItem("{{$authToken}}");
-  {{if .URLParams}}let{{else}}const{{end}} url = '{{.Path}}'
-  {{range .URLParams}}url = url.replace(':{{.}}', encodeURIComponent({{.}}))
-  {{end}}
-  {{if and (eq .Method "GET") .InputType}}
-  url += '?' + new URLSearchParams(input as any){{end}}
+  const defaultHeaders: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+
+  if (token) {
+    headers['Authorization'] = ` + "`Bearer ${token}`" + `;
+  }
+
+  const requestHeaders = { ...defaultHeaders, ...headers };
+  const requestOptions: RequestInit = {
+    method,
+    headers: requestHeaders,
+  };
+
+  if (method !== 'GET' && input) {
+    requestOptions.body = JSON.stringify(input);
+  }
+
   try {
-    const headers: Record<string, string> = {
-      'Authorization': token ? ` + "`Bearer ${token}`" + ` : "",
-      'Content-Type': 'application/json',
-    };
-    {{range .Headers}}
-    {{if eq .Source "input"}}
-    if ({{.SafeName}}) {
-      headers['{{.OriginalName}}'] = {{.SafeName}};
-    }
-    {{else if eq .Source "localStorage"}}
-    const {{.SafeName}}Value = localStorage.getItem('{{.OriginalName}}');
-    if ({{.SafeName}}Value) {
-      headers['{{.OriginalName}}'] = {{.SafeName}}Value;
-    }
-    {{else if eq .Source "sessionStorage"}}
-    const {{.SafeName}}Value = sessionStorage.getItem('{{.OriginalName}}');
-    if ({{.SafeName}}Value) {
-      headers['{{.OriginalName}}'] = {{.SafeName}}Value;
-    }
-    {{end}}
-    {{end}}
-    const response = await fetch(url, {
-      method: '{{.Method}}',
-      headers,
-      {{if and (ne .Method "GET") .InputType}}
-      body: JSON.stringify(input),
-      {{end}}
-    });
+    const response = await fetch(url, requestOptions);
 
     if (!response.ok) {
       let errorData;
@@ -90,11 +83,14 @@ export const {{.Name}}Query = async ({{if .URLParams}}{{range $index, $param := 
     }
 
     const data = await response.json();
-    {{if $useDateObject}}// Parse dates in the response
+    {{if $useDateObject}}
+    // Parse dates in the response
     return JSON.parse(JSON.stringify(data), (key, value) =>
       typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value) ? parseDate(value) : value
-    ) as {{.OutputType}};
-    {{else}}return data as {{.OutputType}};{{end}}
+    ) as TOutput;
+    {{else}}
+    return data as TOutput;
+    {{end}}
   } catch (error) {
     if (error instanceof APIError) {
       throw error;
@@ -104,6 +100,38 @@ export const {{.Name}}Query = async ({{if .URLParams}}{{range $index, $param := 
       throw new APIError(0, 'Unknown Error', String(error));
     }
   }
+}
+
+{{range .Handlers}}
+export const {{.Name}}Query = async ({{if .URLParams}}{{range $index, $param := .URLParams}}{{if $index}}, {{end}}{{$param}}: string{{end}}{{if or .InputType (inputHeaders .Headers)}}, {{end}}{{end}}{{if .InputType}}input: {{.InputType}}{{if inputHeaders .Headers}}, {{end}}{{end}}{{range $index, $header := inputHeaders .Headers}}{{if $index}}, {{end}}{{$header.SafeName}}: string{{end}}): Promise<{{.OutputType}}> => {
+  {{if .URLParams}}let{{else}}const{{end}} url = '{{.Path}}'
+  {{range .URLParams}}
+  url = url.replace(':{{.}}', encodeURIComponent({{.}}))
+  {{end}}
+  {{if and (eq .Method "GET") .InputType}}
+  url += '?' + new URLSearchParams(input as any)
+  {{end}}
+
+  const headers: Record<string, string> = {};
+  {{range .Headers}}
+  {{if eq .Source "input"}}
+  if ({{.SafeName}}) {
+    headers['{{.OriginalName}}'] = {{.SafeName}};
+  }
+  {{else if eq .Source "localStorage"}}
+  const {{.SafeName}}Value = localStorage.getItem('{{.OriginalName}}');
+  if ({{.SafeName}}Value) {
+    headers['{{.OriginalName}}'] = {{.SafeName}}Value;
+  }
+  {{else if eq .Source "sessionStorage"}}
+  const {{.SafeName}}Value = sessionStorage.getItem('{{.OriginalName}}');
+  if ({{.SafeName}}Value) {
+    headers['{{.OriginalName}}'] = {{.SafeName}}Value;
+  }
+  {{end}}
+  {{end}}
+
+  return createQuery<{{if .InputType}}{{.InputType}}{{else}}void{{end}}, {{.OutputType}}>('{{.Method}}', url, {{if .InputType}}input{{else}}undefined{{end}}, headers);
 };
 {{end}}
 `
@@ -120,7 +148,7 @@ export const use{{.Name}} = (
     queryKey: ['{{.Name}}'{{if .URLParams}}{{range .URLParams}}, {{.}}{{end}}{{end}}{{if .InputType}}, input{{end}}{{range inputHeaders .Headers}}, {{.SafeName}}{{end}}],
     queryFn: () => {{.Name}}Query({{if .URLParams}}{{range $index, $param := .URLParams}}{{if $index}}, {{end}}{{$param}}{{end}}{{if and .URLParams .InputType}}, {{end}}{{end}}{{if .InputType}}input{{if inputHeaders .Headers}}, {{end}}{{end}}{{range $index, $header := inputHeaders .Headers}}{{if $index}}, {{end}}{{$header.SafeName}}{{end}}),
     ...options,
-  });	
+  });
 {{else}}
 export const use{{.Name}} = (
   {{range $index, $param := .URLParams}}{{if $index}}, {{end}}{{$param}}: string{{end}}
