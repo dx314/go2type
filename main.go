@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"io/ioutil"
 	"log"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"time"
 	"unicode"
 
+	packages "golang.org/x/tools/go/packages"
 	yaml "gopkg.in/yaml.v3"
 )
 
@@ -59,9 +61,10 @@ type TypeInfo struct {
 }
 
 type FieldInfo struct {
-	Name     string
-	Type     string
-	JSONName string
+	Name       string
+	Type       string
+	JSONName   string
+	IsOptional bool
 }
 
 func main() {
@@ -71,7 +74,6 @@ func main() {
 	}
 
 	command := os.Args[1]
-
 	switch command {
 	case "init":
 		if err := initConfig(); err != nil {
@@ -472,21 +474,39 @@ func parsePackage(packagePath string, customTypeMappings map[string]string, useD
 	}
 	if useDateObject {
 		typeMappings["time.Time"] = "Date"
+		typeMappings["pgtype.Timestamptz"] = "Date"
 	} else {
 		typeMappings["time.Time"] = "string /* date-time */"
 	}
 
 	fset := token.NewFileSet()
-	packages, err := parser.ParseDir(fset, packagePath, nil, parser.ParseComments)
+	pkgs, err := parser.ParseDir(fset, packagePath, nil, parser.ParseComments)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error parsing directory: %v", err)
 	}
 
 	registry := newTypeRegistry()
 	var handlers []HandlerInfo
+	importMap := make(map[string]string)
 
-	for _, pkg := range packages {
+	// Get the module name and path
+	moduleName, modulePath, err := getModuleInfo(packagePath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("error getting module info: %v", err)
+	}
+
+	for _, pkg := range pkgs {
 		for _, file := range pkg.Files {
+			// Parse imports
+			for _, imp := range file.Imports {
+				if imp.Name != nil {
+					importMap[imp.Name.Name] = strings.Trim(imp.Path.Value, "\"")
+				} else {
+					parts := strings.Split(strings.Trim(imp.Path.Value, "\""), "/")
+					importMap[parts[len(parts)-1]] = strings.Trim(imp.Path.Value, "\"")
+				}
+			}
+
 			ast.Inspect(file, func(n ast.Node) bool {
 				switch node := n.(type) {
 				case *ast.TypeSpec:
@@ -506,6 +526,11 @@ func parsePackage(packagePath string, customTypeMappings map[string]string, useD
 		}
 	}
 
+	// Resolve nested types and external package types
+	for _, t := range registry.Types {
+		resolveNestedAndExternalTypes(&t, registry, packagePath, modulePath, typeMappings, importMap, moduleName)
+	}
+
 	// Convert registry to slice
 	var allTypes []TypeInfo
 	for _, t := range registry.Types {
@@ -516,6 +541,243 @@ func parsePackage(packagePath string, customTypeMappings map[string]string, useD
 	usedTypes := filterUsedTypes(allTypes, handlers)
 
 	return usedTypes, handlers, nil
+}
+
+func resolveNestedAndExternalTypes(t *TypeInfo, registry *TypeRegistry, currentPackagePath, modulePath string, typeMappings map[string]string, importMap map[string]string, moduleName string) {
+	for i, field := range t.Fields {
+		if strings.Contains(field.Type, ".") {
+			parts := strings.Split(field.Type, ".")
+			packageName, typeName := parts[0], parts[1]
+
+			fullPackagePath, ok := importMap[packageName]
+			if !ok {
+				fmt.Printf("Warning: Could not find import for package %s\n", packageName)
+				continue
+			}
+
+			isExternalPackage := !strings.HasPrefix(fullPackagePath, moduleName)
+
+			var resolvedType TypeInfo
+			var err error
+
+			if isExternalPackage {
+				// For external packages, use parseExternalType
+				resolvedType, err = parseExternalType(currentPackagePath, fullPackagePath, typeName, typeMappings, moduleName)
+				if err != nil {
+					fmt.Printf("Warning: Failed to resolve external type %s: %v\n", field.Type, err)
+					continue
+				}
+
+				// Use the mapped type directly for external types
+				t.Fields[i].Type = resolvedType.Fields[0].Type
+			} else {
+				// For internal packages, parse the type structure
+				resolvedType, err = parseInternalType(currentPackagePath, modulePath, fullPackagePath, typeName, typeMappings, moduleName)
+				if err != nil {
+					fmt.Printf("Warning: Failed to resolve internal type %s: %v\n", field.Type, err)
+					continue
+				}
+
+				// Rename the type if there's a clash
+				newTypeName := fmt.Sprintf("%s%s", strings.Title(packageName), typeName)
+				t.Fields[i].Type = newTypeName
+
+				// Add the internal type to the registry
+				registry.AddType(TypeInfo{Name: newTypeName, Fields: resolvedType.Fields})
+			}
+		} else if nestedType, ok := registry.GetType(field.Type); ok {
+			// This is a nested type, resolve it recursively
+
+			resolveNestedAndExternalTypes(&nestedType, registry, currentPackagePath, modulePath, typeMappings, importMap, moduleName)
+			registry.AddType(nestedType)
+		}
+	}
+}
+
+func parseExternalType(currentPackagePath, importPath, typeName string, typeMappings map[string]string, moduleName string) (TypeInfo, error) {
+	cfg := &packages.Config{
+		Mode: packages.NeedTypes | packages.NeedSyntax,
+		Dir:  filepath.Dir(currentPackagePath),
+	}
+
+	// If the importPath doesn't start with the module name, prepend it
+	if !strings.Contains(importPath, "/") {
+		importPath = fmt.Sprintf("%s/%s", moduleName, importPath)
+	}
+
+	pkgs, err := packages.Load(cfg, importPath)
+	if err != nil {
+		return TypeInfo{}, fmt.Errorf("failed to load package %s: %v", importPath, err)
+	}
+
+	if len(pkgs) == 0 {
+		return TypeInfo{}, fmt.Errorf("no packages found for %s", importPath)
+	}
+
+	pkg := pkgs[0]
+	if pkg.Types == nil {
+		return TypeInfo{}, fmt.Errorf("types information not available for package %s", importPath)
+	}
+
+	obj := pkg.Types.Scope().Lookup(typeName)
+	if obj == nil {
+		return TypeInfo{}, fmt.Errorf("type %s not found in package %s", typeName, importPath)
+	}
+
+	isExternalPackage := !strings.HasPrefix(pkg.PkgPath, moduleName)
+
+	if isExternalPackage {
+		// For external packages, use type mappings
+		fullTypeName := fmt.Sprintf("%s.%s", filepath.Base(pkg.PkgPath), typeName)
+
+		// Check custom mappings first
+		if mappedType, ok := typeMappings[fullTypeName]; ok {
+			return TypeInfo{
+				Name: typeName,
+				Fields: []FieldInfo{
+					{
+						Name:       typeName,
+						Type:       mappedType,
+						JSONName:   typeName,
+						IsOptional: false,
+					},
+				},
+			}, nil
+		}
+
+		// Then check default mappings
+		if mappedType, ok := defaultTypeMappings[fullTypeName]; ok {
+			return TypeInfo{
+				Name: typeName,
+				Fields: []FieldInfo{
+					{
+						Name:       typeName,
+						Type:       mappedType,
+						JSONName:   typeName,
+						IsOptional: false,
+					},
+				},
+			}, nil
+		}
+
+		// If no mapping found for external type, error out
+		return TypeInfo{}, fmt.Errorf("no type mapping for external type")
+	} else {
+		// For internal packages, parse the type structure
+		return parseTypeObject(obj, typeMappings)
+	}
+}
+
+func getModuleInfo(packagePath string) (string, string, error) {
+	cmd := exec.Command("go", "list", "-m", "-f", "{{.Path}} {{.Dir}}")
+	cmd.Dir = packagePath
+	output, err := cmd.Output()
+	if err != nil {
+		return "", "", err
+	}
+	parts := strings.Fields(strings.TrimSpace(string(output)))
+	if len(parts) != 2 {
+		return "", "", fmt.Errorf("unexpected output format from 'go list -m'")
+	}
+	return parts[0], parts[1], nil
+}
+
+func parseInternalType(currentPackagePath, modulePath, importPath, typeName string, typeMappings map[string]string, moduleName string) (TypeInfo, error) {
+	pkgPath := filepath.Join(modulePath, strings.TrimPrefix(importPath, moduleName))
+
+	cfg := &packages.Config{
+		Mode: packages.NeedTypes | packages.NeedSyntax,
+		Dir:  modulePath,
+	}
+
+	pkgs, err := packages.Load(cfg, pkgPath)
+	if err != nil {
+		return TypeInfo{}, fmt.Errorf("failed to load package %s: %v", pkgPath, err)
+	}
+
+	if len(pkgs) == 0 {
+		return TypeInfo{}, fmt.Errorf("no packages found for %s", pkgPath)
+	}
+
+	pkg := pkgs[0]
+	if pkg.Types == nil {
+		return TypeInfo{}, fmt.Errorf("types information not available for package %s", pkgPath)
+	}
+
+	obj := pkg.Types.Scope().Lookup(typeName)
+	if obj == nil {
+		return TypeInfo{}, fmt.Errorf("type %s not found in package %s", typeName, pkgPath)
+	}
+
+	return parseTypeObject(obj, typeMappings)
+}
+
+func parseTypeObject(obj types.Object, typeMappings map[string]string) (TypeInfo, error) {
+	typeInfo := TypeInfo{Name: obj.Name()}
+
+	switch t := obj.Type().Underlying().(type) {
+	case *types.Struct:
+		for i := 0; i < t.NumFields(); i++ {
+			field := t.Field(i)
+			fieldType, isOptional := parseFieldTypeFromTypes(field.Type(), typeMappings)
+			jsonTag := reflect.StructTag(t.Tag(i)).Get("json")
+			jsonName := strings.Split(jsonTag, ",")[0]
+			if jsonName == "" {
+				jsonName = field.Name()
+			}
+			typeInfo.Fields = append(typeInfo.Fields, FieldInfo{
+				Name:       jsonName,
+				Type:       fieldType,
+				JSONName:   jsonName,
+				IsOptional: isOptional,
+			})
+		}
+	case *types.Basic, *types.Slice, *types.Map, *types.Interface:
+		fieldType, isOptional := parseFieldTypeFromTypes(obj.Type(), typeMappings)
+		typeInfo.Fields = append(typeInfo.Fields, FieldInfo{
+			Name:       obj.Name(),
+			Type:       fieldType,
+			JSONName:   obj.Name(),
+			IsOptional: isOptional,
+		})
+	default:
+		return TypeInfo{}, fmt.Errorf("unsupported type kind for %s: %T", obj.Name(), t)
+	}
+
+	return typeInfo, nil
+}
+
+// Update parseFieldTypeFromTypes to handle more complex types
+func parseFieldTypeFromTypes(t types.Type, typeMappings map[string]string) (string, bool) {
+	switch t := t.(type) {
+	case *types.Basic:
+		if mappedType, ok := defaultTypeMappings[t.Name()]; ok {
+			return mappedType, false
+		}
+		return t.Name(), false
+	case *types.Pointer:
+		elemType, _ := parseFieldTypeFromTypes(t.Elem(), typeMappings)
+		return elemType + " | null", true
+	case *types.Slice:
+		elemType, _ := parseFieldTypeFromTypes(t.Elem(), typeMappings)
+		return fmt.Sprintf("Array<%s>", elemType), false
+	case *types.Map:
+		keyType, _ := parseFieldTypeFromTypes(t.Key(), typeMappings)
+		valueType, _ := parseFieldTypeFromTypes(t.Elem(), typeMappings)
+		return fmt.Sprintf("{ [key: %s]: %s }", keyType, valueType), false
+	case *types.Named:
+		if t.Obj().Pkg() != nil {
+			fullName := fmt.Sprintf("%s.%s", t.Obj().Pkg().Name(), t.Obj().Name())
+			if mappedType, ok := typeMappings[fullName]; ok {
+				return mappedType, false
+			}
+		}
+		return t.Obj().Name(), false
+	case *types.Interface:
+		return "any", false
+	default:
+		return "unknown", false
+	}
 }
 
 func filterUsedTypes(allTypes []TypeInfo, handlers []HandlerInfo) []TypeInfo {
@@ -570,7 +832,7 @@ func parseType(name string, structType *ast.StructType, typeMappings map[string]
 	for _, field := range structType.Fields.List {
 		if len(field.Names) > 0 {
 			fieldName := field.Names[0].Name
-			fieldType := parseFieldType(field.Type, typeMappings)
+			fieldType, isOptional := parseFieldType(field.Type, typeMappings)
 			jsonName := getJSONTag(field.Tag)
 
 			typescriptFieldName := fieldName
@@ -579,40 +841,41 @@ func parseType(name string, structType *ast.StructType, typeMappings map[string]
 			}
 
 			fields = append(fields, FieldInfo{
-				Name:     typescriptFieldName,
-				Type:     fieldType,
-				JSONName: jsonName,
+				Name:       typescriptFieldName,
+				Type:       fieldType,
+				JSONName:   jsonName,
+				IsOptional: isOptional,
 			})
 		}
 	}
 	return TypeInfo{Name: name, Fields: fields}
 }
 
-func parseFieldType(expr ast.Expr, typeMappings map[string]string) string {
+func parseFieldType(expr ast.Expr, typeMappings map[string]string) (string, bool) {
 	switch t := expr.(type) {
 	case *ast.Ident:
 		if mappedType, ok := typeMappings[t.Name]; ok {
-			return mappedType
+			return mappedType, false
 		}
-		return t.Name
+		return t.Name, false
 	case *ast.StarExpr:
-		innerType := parseFieldType(t.X, typeMappings)
-		return fmt.Sprintf("%s | null", innerType)
+		innerType, _ := parseFieldType(t.X, typeMappings)
+		return fmt.Sprintf("%s | null", innerType), true
 	case *ast.ArrayType:
-		elemType := parseFieldType(t.Elt, typeMappings)
-		return fmt.Sprintf("Array<%s>", elemType)
+		elemType, _ := parseFieldType(t.Elt, typeMappings)
+		return fmt.Sprintf("Array<%s>", elemType), false
 	case *ast.MapType:
-		keyType := parseFieldType(t.Key, typeMappings)
-		valueType := parseFieldType(t.Value, typeMappings)
-		return fmt.Sprintf("{ [key: %s]: %s }", keyType, valueType)
+		keyType, _ := parseFieldType(t.Key, typeMappings)
+		valueType, _ := parseFieldType(t.Value, typeMappings)
+		return fmt.Sprintf("{ [key: %s]: %s }", keyType, valueType), false
 	case *ast.SelectorExpr:
 		fullType := fmt.Sprintf("%s.%s", t.X, t.Sel)
 		if mappedType, ok := typeMappings[fullType]; ok {
-			return mappedType
+			return mappedType, false
 		}
-		return fullType
+		return fullType, false
 	default:
-		return "unknown"
+		return "unknown", false
 	}
 }
 
@@ -745,23 +1008,26 @@ func formatHookName(name string) string {
 }
 
 var defaultTypeMappings = map[string]string{
-	"int":     "number",
-	"int8":    "number",
-	"int16":   "number",
-	"int32":   "number",
-	"int64":   "number",
-	"uint":    "number",
-	"uint8":   "number",
-	"uint16":  "number",
-	"uint32":  "number",
-	"uint64":  "number",
-	"float32": "number",
-	"float64": "number",
-	"string":  "string",
-	"bool":    "boolean",
-	"byte":    "number",
-	"rune":    "number",
-	"error":   "Error",
+	"int":                 "number",
+	"int8":                "number",
+	"int16":               "number",
+	"int32":               "number",
+	"int64":               "number",
+	"uint":                "number",
+	"uint8":               "number",
+	"uint16":              "number",
+	"uint32":              "number",
+	"uint64":              "number",
+	"float32":             "number",
+	"float64":             "number",
+	"string":              "string",
+	"bool":                "boolean",
+	"byte":                "number",
+	"rune":                "number",
+	"error":               "Error",
+	"uuid.UUID":           "string /* uuid */",
+	"pgtypes.Timestamptz": "string /* date-time */",
+	"types.Interface":     "any",
 }
 
 func formatCode(filePath string, prettierPath string) error {

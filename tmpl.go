@@ -33,8 +33,9 @@ export class APIError extends Error {
 }
 `
 
+// Update the template to use the new IsOptional field
 const typesTemplate = `{{range .Types}}export type {{.Name}} = { {{range .Fields}}
-  {{.Name}}: {{.Type}};{{end}}
+  {{.Name}}{{if .IsOptional}}?{{end}}: {{.Type}};{{end}}
 }
 {{end}}
 `
