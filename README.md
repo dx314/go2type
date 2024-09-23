@@ -20,6 +20,7 @@ The generator can produce standard query functions, React hooks, or React Query 
 - Automatically parse time.Time as Date objects
 - Prettier formatting support
 - Automatic configuration initialization
+- Flexible header handling with support for different storage options
 
 ## Installation
 
@@ -69,8 +70,8 @@ This command will:
 The `go2type.yaml` file contains the following fields:
 
 ```yaml
-auth_token: "token"
-auth_token_storage: "localStorage" # default: "localStorage"
+auth_token: "session_token"
+auth_token_storage: "localStorage"
 prettier_path: "client-ui/node_modules/prettier/bin/prettier.cjs"
 hooks: react-query
 use_date_object: true
@@ -88,8 +89,8 @@ packages:
 
 - `auth_token`: Specifies the key used to retrieve the authentication token from the specified storage.
 - `auth_token_storage`: Indicates where the authentication token is stored. It can be set to `"localStorage"` or `"sessionStorage"`. Defaults to `"localStorage"`.
-- `prettier_path`: Specifies the path to the Prettier configuration file, used for formatting the generated TypeScript code.
-- `hooks`: Indicates the type of hooks to generate. In this example, it's set to generate React Query hooks.
+- `prettier_path`: Specifies the path to the Prettier executable, used for formatting the generated TypeScript code.
+- `hooks`: Indicates the type of hooks to generate. Options are `"false"`, `"true"` (for React hooks), or `"react-query"`.
 - `use_date_object`: When set to `true`, date fields will be treated as JavaScript Date objects. Defaults to `false`.
 - `packages`: Defines the Go packages to process and where to output the generated TypeScript code.
 - `type_mappings`: Allows you to specify custom mappings from Go types to TypeScript types.
@@ -107,31 +108,38 @@ The `auth_token_storage` field determines where the authentication token is stor
 For example, if your configuration has:
 
 ```yaml
-auth_token: "myAuthToken"
+auth_token: "session_token"
 auth_token_storage: "sessionStorage"
 ```
 
-go2type will look for a token stored under the key "myAuthToken" in sessionStorage. The generated API calls will include this token in their headers.
+go2type will look for a token stored under the key "session_token" in sessionStorage. The generated API calls will include this token in their headers.
 
 If `auth_token_storage` is not specified, it defaults to "localStorage".
 
-### Mapping External Types
+## Header Handling
 
-When using external packages or custom types in your Go code, you need to provide mappings to their TypeScript equivalents. This is particularly important for types from packages like `pgx` or `pgtype.
+go2type provides flexible header handling through the `@Header` directive in Go handler comments. This allows you to specify the source of each header value.
 
-For example, to map types from the `pgtype` package, you can add them to the `type_mappings` section in your `go2type.yaml`:
+The format for the `@Header` directive is:
 
-```yaml
-packages:
-  - path: "internal/app"
-    output_path: "client-ui/src/hooks/index.ts"
-    type_mappings:
-      pgtype.UUID: "string"
-      pgtype.Timestamptz: "string"
-      pgtype.Numeric: "string"
+```
+@Header [source]:[HeaderName]:[StorageKey]
 ```
 
-This ensures that go2type correctly translates these types to TypeScript. You may need to adjust the TypeScript types based on how you handle these types in your frontend code.
+Where:
+- `[source]` can be `input`, `localStorage`, or `sessionStorage`
+- `[HeaderName]` is the name of the header
+- `[StorageKey]` (optional) is the key used to retrieve the value from storage. Not relevant for `input` source.
+
+If `[StorageKey]` is not provided, it defaults to `[HeaderName]`.
+
+### Examples:
+
+```go
+// @Header input:X-Custom-Header
+// @Header localStorage:X-Account-ID:account_id
+// @Header sessionStorage:X-Session-ID
+```
 
 ## Go Code Examples
 
@@ -143,19 +151,12 @@ Handler function with comments:
 // @Input GetUserInput
 // @Output User
 // @Header input:X-Custom-Header
-// @Header localStorage:X-Auth-Token
+// @Header localStorage:X-Auth-Token:auth_token
 // @Header sessionStorage:X-Session-ID
 func GetUserHandler(w http.ResponseWriter, r *http.Request) {
     // Handler implementation
 }
 ```
-
-In the example above, the `@Header` directive specifies the source of each header:
-- `input:X-Custom-Header`: The header value will be provided as an input parameter
-- `localStorage:X-Auth-Token`: The header value will be retrieved from localStorage
-- `sessionStorage:X-Session-ID`: The header value will be retrieved from sessionStorage
-
-If no source is specified, it defaults to `input`.
 
 Go struct:
 
@@ -187,13 +188,17 @@ Standard query function:
 export const GetUserQuery = async (
   id: string,
   input: GetUserInput,
-  X_Custom_Header: string
+  options: { headers: { x_custom_header?: string } } = { headers: {} }
 ): Promise<User> => {
-  const headers = {
-    'X-Custom-Header': X_Custom_Header,
-    'X-Auth-Token': localStorage.getItem('X-Auth-Token') || '',
-    'X-Session-ID': sessionStorage.getItem('X-Session-ID') || '',
-  };
+  const x_custom_headerValue = options.headers.x_custom_header;
+  const x_auth_tokenValue = localStorage.getItem('auth_token');
+  const x_session_idValue = sessionStorage.getItem('X-Session-ID');
+  
+  const headers = new Headers();
+  headers.append('X-Custom-Header', x_custom_headerValue || '');
+  headers.append('X-Auth-Token', x_auth_tokenValue || '');
+  headers.append('X-Session-ID', x_session_idValue || '');
+  
   // Implementation
 };
 ```
@@ -204,12 +209,13 @@ export const GetUserQuery = async (
 export const useGetUser = (
         id: string,
         input: GetUserInput,
-        X_Custom_Header: string,
-        options?: Omit<UseQueryOptions<User, APIError>, "queryKey" | "queryFn">
+        options?: Omit<UseQueryOptions<User, APIError>, "queryKey" | "queryFn"> & {
+          headers?: { x_custom_header?: string }
+        }
 ) =>
         useQuery<User, APIError>({
-          queryKey: ["GetUser", id, input, X_Custom_Header],
-          queryFn: () => GetUserQuery(id, input, X_Custom_Header),
+          queryKey: ["GetUser", id, input, options?.headers?.x_custom_header],
+          queryFn: () => GetUserQuery(id, input, { headers: options?.headers || {} }),
           ...options,
         });
 ```
