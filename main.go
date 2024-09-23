@@ -407,14 +407,15 @@ func generateFile(opts GenerateFileOptions) error {
 	}()
 
 	data := TemplateData{
-		Version:       Version,
-		Timestamp:     time.Now().Format(time.RFC3339),
-		Types:         opts.Types,
-		Handlers:      opts.Handlers,
-		AuthToken:     opts.AuthToken,
-		UseHooks:      opts.UseHooks,
-		UseReactQuery: opts.UseReactQuery,
-		UseDateObject: opts.UseDateObject,
+		Version:          Version,
+		Timestamp:        time.Now().Format(time.RFC3339),
+		Types:            opts.Types,
+		Handlers:         opts.Handlers,
+		AuthToken:        opts.AuthToken,
+		AuthTokenStorage: opts.AuthTokenStorage,
+		UseHooks:         opts.UseHooks,
+		UseReactQuery:    opts.UseReactQuery,
+		UseDateObject:    opts.UseDateObject,
 	}
 
 	// Create a new template and add the helper functions

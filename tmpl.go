@@ -2,14 +2,15 @@ package main
 
 // TemplateData is the data passed to the template for generating the TypeScript file
 type TemplateData struct {
-	Version       string
-	Timestamp     string
-	Types         []TypeInfo
-	Handlers      []HandlerInfo
-	AuthToken     string
-	UseHooks      bool
-	UseReactQuery bool
-	UseDateObject bool
+	Version          string
+	Timestamp        string
+	Types            []TypeInfo
+	Handlers         []HandlerInfo
+	AuthToken        string
+	AuthTokenStorage string
+	UseHooks         bool
+	UseReactQuery    bool
+	UseDateObject    bool
 }
 
 const headerTemplate = `// This file is auto-generated. DO NOT EDIT.
