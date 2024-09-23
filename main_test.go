@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,7 +28,7 @@ packages:
     type_mappings:
       UUID: string
 `
-	tmpfile, err := ioutil.TempFile("", "go2type-config-*.yaml")
+	tmpfile, err := os.CreateTemp("", "go2type-config-*.yaml")
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
@@ -90,15 +89,16 @@ packages:
 
 func TestParsePackage(t *testing.T) {
 	// Create a temporary directory for the test module
-	tmpdir, err := ioutil.TempDir("", "go2type-test")
-	if err != nil {
-		t.Fatalf("Failed to create temp directory: %v", err)
-	}
+	tmpdir := os.TempDir()
+
 	// Defer cleanup, but only if the test passes
 	defer func() {
 		if !t.Failed() {
 			t.Logf("Cleaning up temporary directory: %s", tmpdir)
-			os.RemoveAll(tmpdir)
+			err := os.RemoveAll(tmpdir)
+			if err != nil {
+				t.Logf("Failed to clean up temporary directory: %v", err)
+			}
 		} else {
 			t.Logf("Test failed. Temporary directory retained at: %s", tmpdir)
 		}
@@ -106,7 +106,7 @@ func TestParsePackage(t *testing.T) {
 
 	// Set up the module structure
 	modulePath := filepath.Join(tmpdir, "testmodule")
-	err = os.MkdirAll(filepath.Join(modulePath, "internal", "models"), 0755)
+	err := os.MkdirAll(filepath.Join(modulePath, "internal", "models"), 0755)
 	if err != nil {
 		t.Fatalf("Failed to create module structure: %v", err)
 	}
@@ -120,7 +120,7 @@ require (
     github.com/lib/pq v1.10.0
 )
 `
-	err = ioutil.WriteFile(filepath.Join(modulePath, "go.mod"), []byte(goModContent), 0644)
+	err = os.WriteFile(filepath.Join(modulePath, "go.mod"), []byte(goModContent), 0644)
 	if err != nil {
 		t.Fatalf("Failed to write go.mod file: %v", err)
 	}
@@ -155,7 +155,7 @@ func GetUserHandler() {}
 // @Output User
 func CreateUserHandler() {}
 `
-	err = ioutil.WriteFile(filepath.Join(modulePath, "main.go"), []byte(mainContent), 0644)
+	err = os.WriteFile(filepath.Join(modulePath, "main.go"), []byte(mainContent), 0644)
 	if err != nil {
 		t.Fatalf("Failed to write main.go file: %v", err)
 	}
@@ -169,7 +169,7 @@ type UserInfo struct {
     Age   int    ` + "`json:\"age\"`" + `
 }
 `
-	err = ioutil.WriteFile(filepath.Join(modulePath, "internal", "models", "user_info.go"), []byte(userInfoContent), 0644)
+	err = os.WriteFile(filepath.Join(modulePath, "internal", "models", "user_info.go"), []byte(userInfoContent), 0644)
 	if err != nil {
 		t.Fatalf("Failed to write user_info.go file: %v", err)
 	}
@@ -282,15 +282,13 @@ func TestSetupNpmProject(t *testing.T) {
 	}
 
 	// Create a temporary directory
-	tmpdir, err := ioutil.TempDir("", "go2type-npm")
-	if err != nil {
-		t.Fatalf("Failed to create temp directory: %v", err)
-	}
+	tmpdir := os.TempDir()
+
 	// Defer cleanup, but only if the test passes
 	defer func() {
 		if !t.Failed() {
 			t.Logf("Cleaning up temporary directory: %s", tmpdir)
-			os.RemoveAll(tmpdir)
+			_ = os.RemoveAll(tmpdir)
 		} else {
 			t.Logf("Test failed. Temporary directory retained at: %s", tmpdir)
 		}
@@ -308,7 +306,7 @@ func TestSetupNpmProject(t *testing.T) {
 	}
 
 	// Read and parse package.json
-	content, err := ioutil.ReadFile(packageJSONPath)
+	content, err := os.ReadFile(packageJSONPath)
 	if err != nil {
 		t.Fatalf("Failed to read package.json: %v", err)
 	}
@@ -365,15 +363,12 @@ func TestGenerateFile(t *testing.T) {
 	}
 
 	// Create a temporary directory for output
-	tmpdir, err := ioutil.TempDir("", "go2type-output")
-	if err != nil {
-		t.Fatalf("Failed to create temp directory: %v", err)
-	}
+	tmpdir := os.TempDir()
 
 	// Defer cleanup, but only if the test passes
 	defer func() {
 		if !t.Failed() {
-			os.RemoveAll(tmpdir)
+			_ = os.RemoveAll(tmpdir)
 		} else {
 			t.Logf("Test failed. Temporary directory retained at: %s", tmpdir)
 		}
@@ -540,7 +535,7 @@ func TestGenerateFile(t *testing.T) {
 			}
 
 			// Read the generated file
-			content, err := ioutil.ReadFile(tc.outputFile)
+			content, err := os.ReadFile(tc.outputFile)
 			if err != nil {
 				t.Fatalf("Failed to read generated file: %v", err)
 			}
@@ -598,7 +593,7 @@ func runTypeScriptCompilation(t *testing.T, dir string, filePath string) error {
   "exclude": ["node_modules"]
 }`, relFilePath)
 
-	if err := ioutil.WriteFile(tsconfigPath, []byte(tsconfig), 0644); err != nil {
+	if err := os.WriteFile(tsconfigPath, []byte(tsconfig), 0644); err != nil {
 		return fmt.Errorf("failed to create tsconfig.json: %v", err)
 	}
 
@@ -624,7 +619,7 @@ func setupNpmProject(dir string) error {
 	if err != nil {
 		return err
 	}
-	if err := ioutil.WriteFile(filepath.Join(dir, "package.json"), packageJSONBytes, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "package.json"), packageJSONBytes, 0644); err != nil {
 		return err
 	}
 
