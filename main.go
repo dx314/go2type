@@ -120,6 +120,10 @@ func loadConfig(filename string) (*Config, error) {
 		return nil, err
 	}
 
+	if config.AuthTokenStorage != "localStorage" && config.AuthTokenStorage != "sessionStorage" {
+		config.AuthTokenStorage = "localStorage"
+	}
+
 	return &config, nil
 }
 
