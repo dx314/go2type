@@ -3,13 +3,17 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
+
+var Timestamp = fmt.Sprintf("%d", time.Now().Unix())
 
 func TestLoadConfig(t *testing.T) {
 	// Create a temporary config file
@@ -121,7 +125,7 @@ prettier_path: /usr/local/bin/prettier
 
 func TestParsePackage(t *testing.T) {
 	// Create a temporary directory for the test module
-	tmpdir := os.TempDir()
+	tmpdir := createTempFolder(t.Name())
 
 	// Defer cleanup, but only if the test passes
 	defer func() {
@@ -311,7 +315,7 @@ func TestSetupNpmProject(t *testing.T) {
 	}
 
 	// Create a temporary directory
-	tmpdir := os.TempDir()
+	tmpdir := createTempFolder(t.Name())
 
 	// Defer cleanup, but only if the test passes
 	defer func() {
@@ -392,7 +396,7 @@ func TestGenerateFile(t *testing.T) {
 	}
 
 	// Create a temporary directory for output
-	tmpdir := os.TempDir()
+	tmpdir := createTempFolder(t.Name())
 
 	// Defer cleanup, but only if the test passes
 	defer func() {
@@ -711,4 +715,20 @@ func setupNpmProject(dir string) error {
 	}
 
 	return nil
+}
+
+func createTempFolder(name string) string {
+	// Get the system's temporary directory
+	tempDir := os.TempDir()
+
+	// Combine the temp directory path with the provided folder name
+	fullPath := filepath.Join(tempDir, Timestamp, name)
+
+	// Create the directory
+	err := os.MkdirAll(fullPath, 0755)
+	if err != nil {
+		log.Fatalf("Failed to create temporary directory: %v", err)
+	}
+
+	return fullPath
 }
