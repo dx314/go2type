@@ -86,6 +86,7 @@ func main() {
 			os.Exit(1)
 		}
 	case "generate":
+		printVersion()
 		if err := generate(true); err != nil {
 			fmt.Printf("Error generating files: %v\n", err)
 			os.Exit(1)
