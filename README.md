@@ -169,57 +169,6 @@ type User struct {
 }
 ```
 
-## Generated TypeScript
-
-Types:
-
-```typescript
-export type User = {
-  id: number;
-  name: string;
-  email: string;
-  created_at: Date;
-};
-```
-
-Standard query function:
-
-```typescript
-export const GetUserQuery = async (
-  id: string,
-  input: GetUserInput,
-  options: { headers: { x_custom_header?: string } } = { headers: {} }
-): Promise<User> => {
-  const x_custom_headerValue = options.headers.x_custom_header;
-  const x_auth_tokenValue = localStorage.getItem('auth_token');
-  const x_session_idValue = sessionStorage.getItem('X-Session-ID');
-  
-  const headers = new Headers();
-  headers.append('X-Custom-Header', x_custom_headerValue || '');
-  headers.append('X-Auth-Token', x_auth_tokenValue || '');
-  headers.append('X-Session-ID', x_session_idValue || '');
-  
-  // Implementation
-};
-```
-
-@tanstack/react-query hook:
-
-```typescript
-export const useGetUser = (
-        id: string,
-        input: GetUserInput,
-        options?: Omit<UseQueryOptions<User, APIError>, "queryKey" | "queryFn"> & {
-          headers?: { x_custom_header?: string }
-        }
-) =>
-        useQuery<User, APIError>({
-          queryKey: ["GetUser", id, input, options?.headers?.x_custom_header],
-          queryFn: () => GetUserQuery(id, input, { headers: options?.headers || {} }),
-          ...options,
-        });
-```
-
 ## License
 
 MIT License
