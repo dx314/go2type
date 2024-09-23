@@ -562,6 +562,8 @@ func parsePackage(packagePath string, customTypeMappings map[string]string, useD
 
 func resolveNestedAndExternalTypes(t *TypeInfo, registry *TypeRegistry, currentPackagePath, modulePath string, typeMappings map[string]string, importMap map[string]string, moduleName string) {
 	for i, field := range t.Fields {
+		//nestedType, ok := registry.GetType(strings.Split(field.Type, " ")[0])
+
 		if strings.Contains(field.Type, ".") {
 			parts := strings.Split(field.Type, ".")
 			packageName, typeName := parts[0], parts[1]
@@ -602,9 +604,9 @@ func resolveNestedAndExternalTypes(t *TypeInfo, registry *TypeRegistry, currentP
 				// Add the internal type to the registry
 				registry.AddType(TypeInfo{Name: newTypeName, Fields: resolvedType.Fields})
 			}
-		} else if nestedType, ok := registry.GetType(field.Type); ok {
+		} else if nestedType, ok := registry.GetType(strings.Split(field.Type, " ")[0]); ok {
 			// This is a nested type, resolve it recursively
-
+			fmt.Println("Resolving type", nestedType)
 			resolveNestedAndExternalTypes(&nestedType, registry, currentPackagePath, modulePath, typeMappings, importMap, moduleName)
 			registry.AddType(nestedType)
 		}
@@ -634,6 +636,11 @@ func parseExternalType(currentPackagePath, importPath, typeName string, typeMapp
 	pkg := pkgs[0]
 	if pkg.Types == nil {
 		return TypeInfo{}, fmt.Errorf("types information not available for package %s", importPath)
+	}
+
+	typeName = strings.TrimPrefix(typeName, "*")
+	if strings.Contains(typeName, " ") {
+		typeName = strings.Split(typeName, " ")[0]
 	}
 
 	obj := pkg.Types.Scope().Lookup(typeName)
@@ -721,10 +728,12 @@ func parseInternalType(currentPackagePath, modulePath, importPath, typeName stri
 		return TypeInfo{}, fmt.Errorf("types information not available for package %s", pkgPath)
 	}
 
-	splitTypeName := strings.Split(typeName, " ")
-	if len(splitTypeName) > 1 {
-		typeName = splitTypeName[0]
+	typeName = strings.TrimPrefix(typeName, "*")
+	if strings.Contains(typeName, " ") {
+		typeName = strings.Split(typeName, " ")[0]
 	}
+
+	fmt.Println("typeName", typeName)
 
 	obj := pkg.Types.Scope().Lookup(typeName)
 	if obj == nil {
