@@ -99,8 +99,6 @@ func main() {
 	}
 }
 
-var Version = "v0.9.11"
-
 func printVersion() {
 	fmt.Printf("go2type version %s\n", Version)
 	if info, ok := debug.ReadBuildInfo(); ok {
