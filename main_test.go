@@ -15,6 +15,7 @@ func TestLoadConfig(t *testing.T) {
 	// Create a temporary config file
 	content := `
 auth_token: test_token
+auth_token_storage: sessionStorage
 prettier_path: /usr/local/bin/prettier
 hooks: react-query
 use_date_object: true
@@ -32,7 +33,7 @@ packages:
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpfile.Name())
+	defer func() { _ = os.Remove(tmpfile.Name()) }()
 
 	if _, err := tmpfile.Write([]byte(content)); err != nil {
 		t.Fatalf("Failed to write to temp file: %v", err)
@@ -50,6 +51,10 @@ packages:
 	// Verify the loaded config
 	if config.AuthToken != "test_token" {
 		t.Errorf("Expected AuthToken to be 'test_token', got '%s'", config.AuthToken)
+	}
+
+	if config.AuthTokenStorage != "sessionStorage" {
+		t.Errorf("Expected AuthTokenStorage to be 'sessionStorage', got '%s'", config.AuthTokenStorage)
 	}
 	if config.PrettierPath != "/usr/local/bin/prettier" {
 		t.Errorf("Expected PrettierPath to be '/usr/local/bin/prettier', got '%s'", config.PrettierPath)
@@ -84,6 +89,33 @@ packages:
 	}
 	if config.Packages[1].TypeMappings["UUID"] != "string" {
 		t.Errorf("Expected UUID mapping to be 'string', got '%s'", config.Packages[1].TypeMappings["UUID"])
+	}
+
+	// Test default value for AuthTokenStorage
+	defaultConfig := `
+auth_token: default_token
+prettier_path: /usr/local/bin/prettier
+`
+	tmpfile2, err := os.CreateTemp("", "go2type-config-default-*.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create temp file for default config: %v", err)
+	}
+	defer func() { _ = os.Remove(tmpfile2.Name()) }()
+
+	if _, err := tmpfile2.Write([]byte(defaultConfig)); err != nil {
+		t.Fatalf("Failed to write to temp file for default config: %v", err)
+	}
+	if err := tmpfile2.Close(); err != nil {
+		t.Fatalf("Failed to close temp file for default config: %v", err)
+	}
+
+	defaultLoadedConfig, err := loadConfig(tmpfile2.Name())
+	if err != nil {
+		t.Fatalf("Failed to load default config: %v", err)
+	}
+
+	if defaultLoadedConfig.AuthTokenStorage != "localStorage" {
+		t.Errorf("Expected default AuthTokenStorage to be 'localStorage', got '%s'", defaultLoadedConfig.AuthTokenStorage)
 	}
 }
 
@@ -426,79 +458,38 @@ func TestGenerateFile(t *testing.T) {
 	}
 
 	testCases := []struct {
-		name            string
-		useHooks        bool
-		useReactQuery   bool
-		useDateObject   bool
-		expectedContent []string
-		outputFile      string
+		name             string
+		useHooks         bool
+		useReactQuery    bool
+		useDateObject    bool
+		authTokenStorage string
+		expectedContent  []string
+		outputFile       string
 	}{
 		{
-			name:          "No hooks, no date object",
-			outputFile:    filepath.Join(tmpdir, "no_hooks__no_date_obj.ts"),
-			useHooks:      false,
-			useReactQuery: false,
-			useDateObject: false,
+			name:             "No hooks, no date object, localStorage",
+			outputFile:       filepath.Join(tmpdir, "no_hooks__no_date_obj__localStorage.ts"),
+			useHooks:         false,
+			useReactQuery:    false,
+			useDateObject:    false,
+			authTokenStorage: "localStorage",
 			expectedContent: []string{
 				"export type User",
 				"export type GetUserInput",
 				"export type CreateUserInput",
 				"export const GetUserQuery",
 				"export const CreateUserQuery",
+				"localStorage.getItem",
+				"const token = localStorage.getItem",
 			},
 		},
 		{
-			name:          "React hooks, no date object",
-			outputFile:    filepath.Join(tmpdir, "react_hooks__no_date_obj.ts"),
-			useHooks:      true,
-			useReactQuery: false,
-			useDateObject: false,
-			expectedContent: []string{
-				"export type User",
-				"export type GetUserInput",
-				"export type CreateUserInput",
-				"export const useGetUser",
-				"export const useCreateUser",
-				"useState<User | null>",
-			},
-		},
-		{
-			name:          "React hooks, with date object",
-			outputFile:    filepath.Join(tmpdir, "react_hooks__with_date_obj.ts"),
-			useHooks:      true,
-			useReactQuery: false,
-			useDateObject: true,
-			expectedContent: []string{
-				"export type User",
-				"export type GetUserInput",
-				"export type CreateUserInput",
-				"export const useGetUser",
-				"export const useCreateUser",
-				"useState<User | null>",
-			},
-		},
-		{
-			name:          "React Query hooks, no date object",
-			outputFile:    filepath.Join(tmpdir, "react_query_hooks__no_date_obj.ts"),
-			useHooks:      true,
-			useReactQuery: true,
-			useDateObject: false,
-			expectedContent: []string{
-				"export type User",
-				"export type GetUserInput",
-				"export type CreateUserInput",
-				"export const useGetUser",
-				"export const useCreateUser",
-				"useQuery<User, APIError>",
-				"useMutation<User, APIError",
-			},
-		},
-		{
-			name:          "React Query hooks, with date object",
-			outputFile:    filepath.Join(tmpdir, "react_query_hooks__date_obj.ts"),
-			useHooks:      true,
-			useReactQuery: true,
-			useDateObject: true,
+			name:             "React Query hooks, with date object, sessionStorage",
+			outputFile:       filepath.Join(tmpdir, "react_query_hooks__date_obj__sessionStorage.ts"),
+			useHooks:         true,
+			useReactQuery:    true,
+			useDateObject:    true,
+			authTokenStorage: "sessionStorage",
 			expectedContent: []string{
 				"export type User",
 				"export type GetUserInput",
@@ -510,6 +501,97 @@ func TestGenerateFile(t *testing.T) {
 				"export const useCreateUser",
 				"useQuery<User, APIError>",
 				"useMutation<User, APIError",
+				"sessionStorage.getItem",
+				"const token = sessionStorage.getItem",
+			},
+		},
+		{
+			name:             "No hooks, no date object",
+			outputFile:       filepath.Join(tmpdir, "no_hooks__no_date_obj.ts"),
+			useHooks:         false,
+			useReactQuery:    false,
+			useDateObject:    false,
+			authTokenStorage: "localStorage",
+			expectedContent: []string{
+				"export type User",
+				"export type GetUserInput",
+				"export type CreateUserInput",
+				"export const GetUserQuery",
+				"export const CreateUserQuery",
+				"const token = localStorage.getItem",
+			},
+		},
+		{
+			name:             "React hooks, no date object",
+			outputFile:       filepath.Join(tmpdir, "react_hooks__no_date_obj.ts"),
+			useHooks:         true,
+			useReactQuery:    false,
+			useDateObject:    false,
+			authTokenStorage: "localStorage",
+			expectedContent: []string{
+				"export type User",
+				"export type GetUserInput",
+				"export type CreateUserInput",
+				"export const useGetUser",
+				"export const useCreateUser",
+				"useState<User | null>",
+				"const token = localStorage.getItem",
+			},
+		},
+		{
+			name:             "React hooks, with date object",
+			outputFile:       filepath.Join(tmpdir, "react_hooks__with_date_obj.ts"),
+			useHooks:         true,
+			useReactQuery:    false,
+			useDateObject:    true,
+			authTokenStorage: "localStorage",
+			expectedContent: []string{
+				"export type User",
+				"export type GetUserInput",
+				"export type CreateUserInput",
+				"export const useGetUser",
+				"export const useCreateUser",
+				"useState<User | null>",
+				"const token = localStorage.getItem",
+			},
+		},
+		{
+			name:             "React Query hooks, no date object",
+			outputFile:       filepath.Join(tmpdir, "react_query_hooks__no_date_obj.ts"),
+			useHooks:         true,
+			useReactQuery:    true,
+			useDateObject:    false,
+			authTokenStorage: "localStorage",
+			expectedContent: []string{
+				"export type User",
+				"export type GetUserInput",
+				"export type CreateUserInput",
+				"export const useGetUser",
+				"export const useCreateUser",
+				"useQuery<User, APIError>",
+				"useMutation<User, APIError",
+				"const token = localStorage.getItem",
+			},
+		},
+		{
+			name:             "React Query hooks, with date object",
+			outputFile:       filepath.Join(tmpdir, "react_query_hooks__date_obj.ts"),
+			useHooks:         true,
+			useReactQuery:    true,
+			useDateObject:    true,
+			authTokenStorage: "localStorage",
+			expectedContent: []string{
+				"export type User",
+				"export type GetUserInput",
+				"export type CreateUserInput",
+				"created_at: Date;",
+				"updated_at: Date;",
+				"const parseDate = (dateString: string): Date => new Date(dateString);",
+				"export const useGetUser",
+				"export const useCreateUser",
+				"useQuery<User, APIError>",
+				"useMutation<User, APIError",
+				"const token = localStorage.getItem",
 			},
 		},
 	}
@@ -517,14 +599,15 @@ func TestGenerateFile(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			opts := GenerateFileOptions{
-				Types:         types,
-				Handlers:      handlers,
-				OutputFile:    tc.outputFile,
-				AuthToken:     "test_token",
-				UseHooks:      tc.useHooks,
-				UseReactQuery: tc.useReactQuery,
-				ShouldFormat:  false,
-				UseDateObject: tc.useDateObject,
+				Types:            types,
+				Handlers:         handlers,
+				OutputFile:       tc.outputFile,
+				AuthToken:        "test_token",
+				AuthTokenStorage: tc.authTokenStorage,
+				UseHooks:         tc.useHooks,
+				UseReactQuery:    tc.useReactQuery,
+				ShouldFormat:     false,
+				UseDateObject:    tc.useDateObject,
 			}
 
 			if err := generateFile(opts); err != nil {
