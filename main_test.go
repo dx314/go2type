@@ -178,12 +178,16 @@ type User struct {
 
 // @Method GET
 // @Path /users/:id
+// @Header localStorage:X-Auth-Token:auth_token
+// @Header localStorage:X-Custom-Header
 // @Input GetUserInput
 // @Output User
 func GetUserHandler() {}
 
 // @Method POST
 // @Path /users
+// @Header sessionStorage:X-Session-ID:session_id
+// @Header input:Content-Type
 // @Input CreateUserInput
 // @Output User
 func CreateUserHandler() {}
@@ -269,6 +273,20 @@ type UserInfo struct {
 			InputType:  "GetUserInput",
 			OutputType: "User",
 			URLParams:  []string{"id"},
+			Headers: []HeaderInfo{
+				{
+					HeaderKey:  "X-Auth-Token",
+					SafeName:   "x_auth_token",
+					Source:     "localStorage",
+					StorageKey: "auth_token",
+				},
+				{
+					HeaderKey:  "X-Custom-Header",
+					SafeName:   "x_custom_header",
+					Source:     "localStorage",
+					StorageKey: "X-Custom-Header", // Default to header key
+				},
+			},
 		},
 		{
 			Name:       "CreateUser",
@@ -276,6 +294,20 @@ type UserInfo struct {
 			Path:       "/users",
 			InputType:  "CreateUserInput",
 			OutputType: "User",
+			Headers: []HeaderInfo{
+				{
+					HeaderKey:  "X-Session-ID",
+					SafeName:   "x_session_id",
+					Source:     "sessionStorage",
+					StorageKey: "session_id",
+				},
+				{
+					HeaderKey:  "Content-Type",
+					SafeName:   "content_type",
+					Source:     "input",
+					StorageKey: "",
+				},
+			},
 		},
 	}
 
@@ -446,7 +478,20 @@ func TestGenerateFile(t *testing.T) {
 			InputType:  "GetUserInput",
 			OutputType: "User",
 			URLParams:  []string{"id"},
-			Headers:    []HeaderInfo{{OriginalName: "Authorization", SafeName: "authorization", Source: "input"}},
+			Headers: []HeaderInfo{
+				{
+					HeaderKey:  "X-Auth-Token",
+					SafeName:   "x_auth_token",
+					Source:     "localStorage",
+					StorageKey: "auth_token",
+				},
+				{
+					HeaderKey:  "X-Custom-Header",
+					SafeName:   "x_custom_header",
+					Source:     "localStorage",
+					StorageKey: "X-Custom-Header", // Default to header key
+				},
+			},
 		},
 		{
 			Name:       "CreateUser",
@@ -455,8 +500,18 @@ func TestGenerateFile(t *testing.T) {
 			InputType:  "CreateUserInput",
 			OutputType: "User",
 			Headers: []HeaderInfo{
-				{OriginalName: "Content-Type", SafeName: "content_type", Source: "input"},
-				{OriginalName: "X-Custom-Header", SafeName: "x_custom_header", Source: "localStorage"},
+				{
+					HeaderKey:  "X-Session-ID",
+					SafeName:   "x_session_id",
+					Source:     "sessionStorage",
+					StorageKey: "session_id",
+				},
+				{
+					HeaderKey:  "Content-Type",
+					SafeName:   "content_type",
+					Source:     "input",
+					StorageKey: "",
+				},
 			},
 		},
 	}
@@ -503,7 +558,7 @@ func TestGenerateFile(t *testing.T) {
 				"const parseDate = (dateString: string): Date => new Date(dateString);",
 				"export const useGetUser",
 				"export const useCreateUser",
-				"useQuery<User, APIError>",
+				"useQuery<User, APIError, User",
 				"useMutation<User, APIError",
 				"sessionStorage.getItem",
 				"const token = sessionStorage.getItem",
@@ -572,7 +627,7 @@ func TestGenerateFile(t *testing.T) {
 				"export type CreateUserInput",
 				"export const useGetUser",
 				"export const useCreateUser",
-				"useQuery<User, APIError>",
+				"useQuery<User, APIError, User",
 				"useMutation<User, APIError",
 				"const token = localStorage.getItem",
 			},
@@ -593,9 +648,23 @@ func TestGenerateFile(t *testing.T) {
 				"const parseDate = (dateString: string): Date => new Date(dateString);",
 				"export const useGetUser",
 				"export const useCreateUser",
-				"useQuery<User, APIError>",
+				"useQuery<User, APIError, User",
 				"useMutation<User, APIError",
 				"const token = localStorage.getItem",
+			},
+		},
+		{
+			name:             "React Query hooks with storage keys and defaults",
+			outputFile:       filepath.Join(tmpdir, "react_query_hooks_with_storage_keys_and_defaults.ts"),
+			useHooks:         true,
+			useReactQuery:    true,
+			useDateObject:    true,
+			authTokenStorage: "localStorage",
+			expectedContent: []string{
+				"const x_auth_tokenValue = localStorage.getItem('auth_token');",
+				"const x_custom_headerValue = localStorage.getItem('X-Custom-Header');",
+				"const x_session_idValue = sessionStorage.getItem('session_id');",
+				"headers['Content-Type'] = content_type;",
 			},
 		},
 	}

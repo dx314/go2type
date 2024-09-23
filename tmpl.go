@@ -118,18 +118,15 @@ export const {{.Name}}Query = async ({{if .URLParams}}{{range $index, $param := 
   {{range .Headers}}
   {{if eq .Source "input"}}
   if ({{.SafeName}}) {
-    headers['{{.OriginalName}}'] = {{.SafeName}};
+    headers['{{.HeaderKey}}'] = {{.SafeName}};
   }
-  {{else if eq .Source "localStorage"}}
-  const {{.SafeName}}Value = localStorage.getItem('{{.OriginalName}}');
-  if ({{.SafeName}}Value) {
-    headers['{{.OriginalName}}'] = {{.SafeName}}Value;
+  {{else}}
+  const {{.SafeName}}Value = {{.Source}}.getItem('{{.StorageKey}}');
+  if (!{{.SafeName}}Value || {{.SafeName}}Value === "") {
+	throw new Error('Missing required header: {{.HeaderKey}}');
   }
-  {{else if eq .Source "sessionStorage"}}
-  const {{.SafeName}}Value = sessionStorage.getItem('{{.OriginalName}}');
-  if ({{.SafeName}}Value) {
-    headers['{{.OriginalName}}'] = {{.SafeName}}Value;
-  }
+  headers['{{.HeaderKey}}'] = {{.SafeName}}Value;
+  
   {{end}}
   {{end}}
 
@@ -174,7 +171,7 @@ export const use{{.Name}} = (
 const reactHookTemplate = `{{range .Handlers}}
 // Custom React hook
 export const use{{.Name}} = (
-  {{if eq .Method "GET"}}{{if .InputType}}input: {{.InputType}}{{end}}{{if inputHeaders .Headers}}, {{end}}{{end}}
+  {{if eq .Method "GET"}}{{if .InputType}}input: {{.InputType}},{{end}}{{end}}
   {{if .URLParams}}{{range $index, $param := .URLParams}}{{if $index}}, {{end}}{{$param}}: string{{end}}{{if or .InputType (inputHeaders .Headers)}}, {{end}}{{end}}
   {{range $index, $header := inputHeaders .Headers}}{{if $index}}, {{end}}{{$header.SafeName}}: string{{end}}
 ) => {

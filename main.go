@@ -41,9 +41,10 @@ type PackageConfig struct {
 }
 
 type HeaderInfo struct {
-	OriginalName string
-	SafeName     string
-	Source       string
+	HeaderKey  string
+	SafeName   string
+	Source     string
+	StorageKey string
 }
 
 type HandlerInfo struct {
@@ -606,7 +607,6 @@ func resolveNestedAndExternalTypes(t *TypeInfo, registry *TypeRegistry, currentP
 			}
 		} else if nestedType, ok := registry.GetType(strings.Split(field.Type, " ")[0]); ok {
 			// This is a nested type, resolve it recursively
-			fmt.Println("Resolving type", nestedType)
 			resolveNestedAndExternalTypes(&nestedType, registry, currentPackagePath, modulePath, typeMappings, importMap, moduleName)
 			registry.AddType(nestedType)
 		}
@@ -733,8 +733,6 @@ func parseInternalType(currentPackagePath, modulePath, importPath, typeName stri
 		typeName = strings.Split(typeName, " ")[0]
 	}
 
-	fmt.Println("typeName", typeName)
-
 	obj := pkg.Types.Scope().Lookup(typeName)
 	if obj == nil {
 		return TypeInfo{}, fmt.Errorf("type %s not found in package %s", typeName, pkgPath)
@@ -837,7 +835,7 @@ func filterUsedTypes(allTypes []TypeInfo, handlers []HandlerInfo) []TypeInfo {
 			for _, t := range allTypes {
 				if t.Name == typeName {
 					for _, field := range t.Fields {
-						fieldType := strings.TrimSuffix(strings.TrimPrefix(field.Type, "Array<"), ">")
+						fieldType := strings.Split(strings.TrimSuffix(strings.TrimPrefix(field.Type, "Array<"), ">"), " ")[0]
 						if !usedTypeSet[fieldType] {
 							queue = append(queue, fieldType)
 						}
@@ -871,6 +869,11 @@ func parseType(name string, structType *ast.StructType, typeMappings map[string]
 				typescriptFieldName = jsonName
 			}
 
+			// Add "| null" only if the field is optional
+			if isOptional {
+				fieldType += " | null"
+			}
+
 			fields = append(fields, FieldInfo{
 				Name:       typescriptFieldName,
 				Type:       fieldType,
@@ -891,10 +894,10 @@ func parseFieldType(expr ast.Expr, typeMappings map[string]string) (string, bool
 		return t.Name, false
 	case *ast.StarExpr:
 		innerType, _ := parseFieldType(t.X, typeMappings)
-		return fmt.Sprintf("%s | null", innerType), true
+		return innerType, true // Return the inner type and mark as optional
 	case *ast.ArrayType:
 		elemType, _ := parseFieldType(t.Elt, typeMappings)
-		return fmt.Sprintf("Array<%s>", elemType), true
+		return fmt.Sprintf("Array<%s>", elemType), false
 	case *ast.MapType:
 		keyType, _ := parseFieldType(t.Key, typeMappings)
 		valueType, _ := parseFieldType(t.Value, typeMappings)
@@ -987,18 +990,31 @@ func toTypescriptSafeHeader(s string) string {
 
 func parseHeaderDirective(directive string) HeaderInfo {
 	parts := strings.Split(directive, ":")
-	if len(parts) == 2 {
+	if len(parts) == 3 {
 		return HeaderInfo{
-			OriginalName: parts[1],
-			SafeName:     toTypescriptSafeHeader(parts[1]),
-			Source:       parts[0],
+			HeaderKey:  parts[1],
+			SafeName:   toTypescriptSafeHeader(parts[1]),
+			Source:     parts[0],
+			StorageKey: parts[2],
+		}
+	} else if len(parts) == 2 {
+		storageKey := ""
+		if parts[0] != "input" {
+			storageKey = parts[1]
+		}
+		return HeaderInfo{
+			HeaderKey:  parts[1],
+			SafeName:   toTypescriptSafeHeader(parts[1]),
+			Source:     parts[0],
+			StorageKey: storageKey,
 		}
 	}
 	// If the directive is not in the expected format, default to input
 	return HeaderInfo{
-		OriginalName: directive,
-		SafeName:     toTypescriptSafeHeader(directive),
-		Source:       "input",
+		HeaderKey:  directive,
+		SafeName:   toTypescriptSafeHeader(directive),
+		Source:     "input",
+		StorageKey: "",
 	}
 }
 
