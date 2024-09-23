@@ -65,6 +65,7 @@ type FieldInfo struct {
 	Name       string
 	Type       string
 	JSONName   string
+	IsArray    bool
 	IsOptional bool
 }
 
@@ -377,6 +378,9 @@ func generateFile(opts GenerateFileOptions) error {
 		},
 		"sub": func(a, b int) int {
 			return a - b
+		},
+		"firstWord": func(s string) string {
+			return strings.Split(s, " ")[0]
 		},
 		"inputHeaders": func(headers []HeaderInfo) []HeaderInfo {
 			var result []HeaderInfo
@@ -710,6 +714,11 @@ func parseInternalType(currentPackagePath, modulePath, importPath, typeName stri
 		return TypeInfo{}, fmt.Errorf("types information not available for package %s", pkgPath)
 	}
 
+	splitTypeName := strings.Split(typeName, " ")
+	if len(splitTypeName) > 1 {
+		typeName = splitTypeName[0]
+	}
+
 	obj := pkg.Types.Scope().Lookup(typeName)
 	if obj == nil {
 		return TypeInfo{}, fmt.Errorf("type %s not found in package %s", typeName, pkgPath)
@@ -766,7 +775,7 @@ func parseFieldTypeFromTypes(t types.Type, typeMappings map[string]string) (stri
 		return elemType + " | null", true
 	case *types.Slice:
 		elemType, _ := parseFieldTypeFromTypes(t.Elem(), typeMappings)
-		return fmt.Sprintf("Array<%s>", elemType), false
+		return fmt.Sprintf("Array<%s>", elemType), true
 	case *types.Map:
 		keyType, _ := parseFieldTypeFromTypes(t.Key(), typeMappings)
 		valueType, _ := parseFieldTypeFromTypes(t.Elem(), typeMappings)
@@ -869,7 +878,7 @@ func parseFieldType(expr ast.Expr, typeMappings map[string]string) (string, bool
 		return fmt.Sprintf("%s | null", innerType), true
 	case *ast.ArrayType:
 		elemType, _ := parseFieldType(t.Elt, typeMappings)
-		return fmt.Sprintf("Array<%s>", elemType), false
+		return fmt.Sprintf("Array<%s>", elemType), true
 	case *ast.MapType:
 		keyType, _ := parseFieldType(t.Key, typeMappings)
 		valueType, _ := parseFieldType(t.Value, typeMappings)
@@ -883,35 +892,6 @@ func parseFieldType(expr ast.Expr, typeMappings map[string]string) (string, bool
 	default:
 		return "unknown", false
 	}
-}
-
-func resolveNestedTypes(fields []FieldInfo, registry *TypeRegistry, typeMappings map[string]string) []FieldInfo {
-	resolvedFields := make([]FieldInfo, len(fields))
-	for i, field := range fields {
-		if nestedType, ok := registry.GetType(field.Type); ok {
-			// This is a nested type, so we need to create a new type for it
-			nestedFields := resolveNestedTypes(nestedType.Fields, registry, typeMappings)
-			registry.AddType(TypeInfo{Name: field.Type, Fields: nestedFields})
-			resolvedFields[i] = field
-		} else if strings.HasPrefix(field.Type, "Array<") {
-			// Handle nested types in arrays
-			innerType := strings.TrimPrefix(strings.TrimSuffix(field.Type, ">"), "Array<")
-			if nestedType, ok := registry.GetType(innerType); ok {
-				nestedFields := resolveNestedTypes(nestedType.Fields, registry, typeMappings)
-				registry.AddType(TypeInfo{Name: innerType, Fields: nestedFields})
-				resolvedFields[i] = FieldInfo{
-					Name:     field.Name,
-					Type:     fmt.Sprintf("Array<%s>", innerType),
-					JSONName: field.JSONName,
-				}
-			} else {
-				resolvedFields[i] = field
-			}
-		} else {
-			resolvedFields[i] = field
-		}
-	}
-	return resolvedFields
 }
 
 func getJSONTag(tag *ast.BasicLit) string {
