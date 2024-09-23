@@ -25,11 +25,12 @@ import (
 
 // Config represents the configuration yaml file
 type Config struct {
-	AuthToken     string          `yaml:"auth_token"`
-	PrettierPath  string          `yaml:"prettier_path"`
-	Hooks         string          `yaml:"hooks"`
-	UseDateObject bool            `yaml:"use_date_object"`
-	Packages      []PackageConfig `yaml:"packages"`
+	AuthToken        string          `yaml:"auth_token"`
+	AuthTokenStorage string          `yaml:"auth_token_storage"`
+	PrettierPath     string          `yaml:"prettier_path"`
+	Hooks            string          `yaml:"hooks"`
+	UseDateObject    bool            `yaml:"use_date_object"`
+	Packages         []PackageConfig `yaml:"packages"`
 }
 
 // PackageConfig represents the configuration for a Go package
@@ -129,8 +130,9 @@ func initConfig() error {
 	}
 
 	config := Config{
-		AuthToken: "session_token",
-		Hooks:     "false",
+		AuthToken:        "session_token",
+		AuthTokenStorage: "localStorage",
+		Hooks:            "false",
 	}
 
 	// Find Go handlers with @Method comments
@@ -314,16 +316,24 @@ func generate(shouldFormat bool) error {
 		useHooks := config.Hooks == "true" || config.Hooks == "react-query"
 		useReactQuery := config.Hooks == "react-query"
 
+		authTokenStorage := "localStorage"
+		if config.AuthTokenStorage == "sessionStorage" {
+			authTokenStorage = config.AuthTokenStorage
+		} else if config.AuthTokenStorage != "localStorage" && config.AuthTokenStorage != "" {
+			fmt.Printf("Warning: Unknown auth token storage type %s. Using localStorage instead.\n", config.AuthTokenStorage)
+		}
+
 		opts := GenerateFileOptions{
-			Types:         pkgTypes,
-			Handlers:      handlers,
-			OutputFile:    pkg.OutputPath,
-			AuthToken:     config.AuthToken,
-			PrettierPath:  config.PrettierPath,
-			UseHooks:      useHooks,
-			UseReactQuery: useReactQuery,
-			ShouldFormat:  shouldFormat,
-			UseDateObject: config.UseDateObject,
+			Types:            pkgTypes,
+			Handlers:         handlers,
+			OutputFile:       pkg.OutputPath,
+			AuthToken:        config.AuthToken,
+			AuthTokenStorage: authTokenStorage,
+			PrettierPath:     config.PrettierPath,
+			UseHooks:         useHooks,
+			UseReactQuery:    useReactQuery,
+			ShouldFormat:     shouldFormat,
+			UseDateObject:    config.UseDateObject,
 		}
 
 		if err := generateFile(opts); err != nil {
@@ -345,15 +355,16 @@ type TemplatePiece struct {
 
 // GenerateFileOptions contains all the options for generating a file
 type GenerateFileOptions struct {
-	Types         []TypeInfo
-	Handlers      []HandlerInfo
-	OutputFile    string
-	AuthToken     string
-	PrettierPath  string
-	UseHooks      bool
-	UseReactQuery bool
-	ShouldFormat  bool
-	UseDateObject bool
+	Types            []TypeInfo
+	Handlers         []HandlerInfo
+	OutputFile       string
+	AuthToken        string
+	AuthTokenStorage string
+	PrettierPath     string
+	UseHooks         bool
+	UseReactQuery    bool
+	ShouldFormat     bool
+	UseDateObject    bool
 }
 
 func generateFile(opts GenerateFileOptions) error {

@@ -41,7 +41,7 @@ const typesTemplate = `{{range .Types}}export type {{firstWord .Name}} = { {{ran
 `
 
 const queryFunctionTemplate = `{{$authToken := .AuthToken}}
-{{$authToken := .AuthToken}}
+{{$authTokenStorage := .AuthTokenStorage}}
 {{$useDateObject := .UseDateObject}}
 
 // Generic query factory
@@ -51,7 +51,7 @@ async function createQuery<TInput, TOutput>(
   input?: TInput,
   headers: Record<string, string> = {}
 ): Promise<TOutput> {
-  const token = localStorage.getItem("{{$authToken}}");
+  const token = {{$authTokenStorage}}.getItem("{{$authToken}}");
   const defaultHeaders: Record<string, string> = {
     'Content-Type': 'application/json',
   };
