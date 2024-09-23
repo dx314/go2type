@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-var Version = "v0.9.13"
+var Version = "v0.9.14"
 
 func printVersion() {
 	fmt.Printf("go2type version %s\n", Version)
