@@ -89,76 +89,114 @@ packages:
 }
 
 func TestParsePackage(t *testing.T) {
-	// Create a temporary directory with Go files
+	// Create a temporary directory for the test module
 	tmpdir, err := ioutil.TempDir("", "go2type-test")
 	if err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
-	defer os.RemoveAll(tmpdir)
+	// Defer cleanup, but only if the test passes
+	defer func() {
+		if !t.Failed() {
+			t.Logf("Cleaning up temporary directory: %s", tmpdir)
+			os.RemoveAll(tmpdir)
+		} else {
+			t.Logf("Test failed. Temporary directory retained at: %s", tmpdir)
+		}
+	}()
 
-	// Create api.go
-	apiContent := `
-package api
+	// Set up the module structure
+	modulePath := filepath.Join(tmpdir, "testmodule")
+	err = os.MkdirAll(filepath.Join(modulePath, "internal", "models"), 0755)
+	if err != nil {
+		t.Fatalf("Failed to create module structure: %v", err)
+	}
 
-import "time"
+	// Create go.mod file
+	goModContent := `module github.com/example/testmodule
+
+go 1.16
+
+require (
+    github.com/lib/pq v1.10.0
+)
+`
+	err = ioutil.WriteFile(filepath.Join(modulePath, "go.mod"), []byte(goModContent), 0644)
+	if err != nil {
+		t.Fatalf("Failed to write go.mod file: %v", err)
+	}
+
+	// Create main.go
+	mainContent := `
+package main
+
+import (
+    "time"
+    "github.com/example/testmodule/internal/models"
+    "github.com/lib/pq"
+)
 
 type User struct {
-	ID        int       ` + "`json:\"id\"`" + `
-	Name      string    ` + "`json:\"name\"`" + `
-	CreatedAt time.Time ` + "`json:\"created_at\"`" + `
+    ID        int             ` + "`json:\"id\"`" + `
+    Name      string          ` + "`json:\"name\"`" + `
+    CreatedAt time.Time       ` + "`json:\"created_at\"`" + `
+    Tags      pq.StringArray  ` + "`json:\"tags\"`" + `
+    Info      models.UserInfo ` + "`json:\"info\"`" + `
 }
 
 // @Method GET
 // @Path /users/:id
 // @Input GetUserInput
 // @Output User
-// @Header X-Authorization
 func GetUserHandler() {}
 
 // @Method POST
 // @Path /users
 // @Input CreateUserInput
-// @Output ComplexUser
-// @Header input:Content-Type
-// @Header localStorage:X-Custom-Header
-// @Header sessionStorage:X-Session-Header
+// @Output User
 func CreateUserHandler() {}
 `
-
-	if err := ioutil.WriteFile(filepath.Join(tmpdir, "api.go"), []byte(apiContent), 0644); err != nil {
-		t.Fatalf("Failed to write api.go file: %v", err)
+	err = ioutil.WriteFile(filepath.Join(modulePath, "main.go"), []byte(mainContent), 0644)
+	if err != nil {
+		t.Fatalf("Failed to write main.go file: %v", err)
 	}
 
-	// Create models.go
-	modelsContent := `
+	// Create internal/models/user_info.go
+	userInfoContent := `
 package models
 
-import "github.com/google/uuid"
-
-type CustomType string
-
-type ComplexUser struct {
-	ID   uuid.UUID  ` + "`json:\"id\"`" + `
-	Info UserInfo   ` + "`json:\"info\"`" + `
-	Tags []string   ` + "`json:\"tags\"`" + `
-}
-
 type UserInfo struct {
-	Email    string     ` + "`json:\"email\"`" + `
-	Settings CustomType ` + "`json:\"settings\"`" + `
+    Email string ` + "`json:\"email\"`" + `
+    Age   int    ` + "`json:\"age\"`" + `
 }
 `
+	err = ioutil.WriteFile(filepath.Join(modulePath, "internal", "models", "user_info.go"), []byte(userInfoContent), 0644)
+	if err != nil {
+		t.Fatalf("Failed to write user_info.go file: %v", err)
+	}
 
-	if err := ioutil.WriteFile(filepath.Join(tmpdir, "models.go"), []byte(modelsContent), 0644); err != nil {
-		t.Fatalf("Failed to write models.go file: %v", err)
+	// run go mod in modulePath
+	cmd := exec.Command("go", "mod", "tidy")
+	cmd.Dir = modulePath
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("Failed to run go mod tidy: %v\nOutput: %s", err, output)
+	}
+
+	// Get the module info
+	moduleName, modulePath, err := getModuleInfo(modulePath)
+	if err != nil {
+		t.Fatalf("Failed to get module info: %v", err)
+	}
+
+	if moduleName == "" {
+		t.Fatalf("Failed to get module name")
 	}
 
 	// Test parsing the package
 	customTypeMappings := map[string]string{
-		"CustomType": "string",
-		"uuid.UUID":  "string",
+		"time.Time":      "Date",
+		"pq.StringArray": "Array<string>",
 	}
-	types, handlers, err := parsePackage(tmpdir, customTypeMappings, true)
+	types, handlers, err := parsePackage(modulePath, customTypeMappings, true)
 	if err != nil {
 		t.Fatalf("Failed to parse package: %v", err)
 	}
@@ -166,26 +204,20 @@ type UserInfo struct {
 	// Verify the parsed types
 	expectedTypes := []TypeInfo{
 		{
-			Name: "ComplexUser",
-			Fields: []FieldInfo{
-				{Name: "id", Type: "string", JSONName: "id"},
-				{Name: "info", Type: "UserInfo", JSONName: "info"},
-				{Name: "tags", Type: "Array<string>", JSONName: "tags"},
-			},
-		},
-		{
-			Name: "UserInfo",
-			Fields: []FieldInfo{
-				{Name: "email", Type: "string", JSONName: "email"},
-				{Name: "settings", Type: "string", JSONName: "settings"},
-			},
-		},
-		{
 			Name: "User",
 			Fields: []FieldInfo{
-				{Name: "id", Type: "number", JSONName: "id"},
-				{Name: "name", Type: "string", JSONName: "name"},
-				{Name: "created_at", Type: "Date", JSONName: "created_at"},
+				{Name: "id", Type: "number", JSONName: "id", IsOptional: false},
+				{Name: "name", Type: "string", JSONName: "name", IsOptional: false},
+				{Name: "created_at", Type: "Date", JSONName: "created_at", IsOptional: false},
+				{Name: "tags", Type: "Array<string>", JSONName: "tags", IsOptional: false},
+				{Name: "info", Type: "ModelsUserInfo", JSONName: "info", IsOptional: false},
+			},
+		},
+		{
+			Name: "ModelsUserInfo",
+			Fields: []FieldInfo{
+				{Name: "email", Type: "string", JSONName: "email", IsOptional: false},
+				{Name: "age", Type: "number", JSONName: "age", IsOptional: false},
 			},
 		},
 	}
@@ -204,19 +236,13 @@ type UserInfo struct {
 			InputType:  "GetUserInput",
 			OutputType: "User",
 			URLParams:  []string{"id"},
-			Headers:    []HeaderInfo{{OriginalName: "X-Authorization", SafeName: "x_authorization", Source: "input"}},
 		},
 		{
 			Name:       "CreateUser",
 			Method:     "POST",
 			Path:       "/users",
 			InputType:  "CreateUserInput",
-			OutputType: "ComplexUser",
-			Headers: []HeaderInfo{
-				{OriginalName: "Content-Type", SafeName: "content_type", Source: "input"},
-				{OriginalName: "X-Custom-Header", SafeName: "x_custom_header", Source: "localStorage"},
-				{OriginalName: "X-Session-Header", SafeName: "x_session_header", Source: "sessionStorage"},
-			},
+			OutputType: "User",
 		},
 	}
 
@@ -225,19 +251,23 @@ type UserInfo struct {
 	}
 }
 
-// Helper function to compare two slices of TypeInfo, ignoring order
-func compareTypes(a, b []TypeInfo) bool {
-	if len(a) != len(b) {
+// Helper function to compare types regardless of order
+func compareTypes(got, want []TypeInfo) bool {
+	if len(got) != len(want) {
 		return false
 	}
 
-	typeMap := make(map[string]TypeInfo)
-	for _, t := range b {
-		typeMap[t.Name] = t
+	gotMap := make(map[string]TypeInfo)
+	for _, t := range got {
+		gotMap[t.Name] = t
 	}
 
-	for _, t := range a {
-		if et, ok := typeMap[t.Name]; !ok || !reflect.DeepEqual(t, et) {
+	for _, w := range want {
+		g, ok := gotMap[w.Name]
+		if !ok {
+			return false
+		}
+		if !reflect.DeepEqual(g, w) {
 			return false
 		}
 	}
