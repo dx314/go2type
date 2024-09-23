@@ -52,7 +52,8 @@ echo "New tag: $new_tag"
 if $DRY_RUN; then
     echo "Would update version.go with: var Version = \"$new_tag\""
 else
-    sed -i "s/var Version = \".*\"/var Version = \"$new_tag\"/" version.go
+    # Cross-platform sed command
+    sed -i.bak "s/var Version = \".*\"/var Version = \"$new_tag\"/" version.go && rm version.go.bak
 fi
 
 # Commit the change to version.go
