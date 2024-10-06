@@ -58,8 +58,9 @@ type HandlerInfo struct {
 }
 
 type TypeInfo struct {
-	Name   string
-	Fields []FieldInfo
+	Name     string
+	FullName string
+	Fields   []FieldInfo
 }
 
 type FieldInfo struct {
@@ -603,8 +604,10 @@ func resolveNestedAndExternalTypes(t *TypeInfo, registry *TypeRegistry, currentP
 
 				t.Fields[i].Type = newTypeName
 
+				tName := strings.Split(strings.TrimSuffix(strings.TrimPrefix(newTypeName, "Array<"), ">"), " ")[0]
+
 				// Add the internal type to the registry
-				registry.AddType(TypeInfo{Name: newTypeName, Fields: resolvedType.Fields})
+				registry.AddType(TypeInfo{Name: tName, FullName: packageName, Fields: resolvedType.Fields})
 			}
 		} else if nestedType, ok := registry.GetType(strings.Split(field.PackageName, " ")[0]); ok {
 			// This is a nested type, resolve it recursively
@@ -651,7 +654,8 @@ func parseExternalType(currentPackagePath, importPath, typeName string, typeMapp
 		if mappedType, ok := typeMappings[fullTypeName]; ok {
 
 			return TypeInfo{
-				Name: typeName,
+				Name:     typeName,
+				FullName: fullTypeName,
 				Fields: []FieldInfo{
 					{
 						PackageName: fullTypeName,
@@ -668,7 +672,8 @@ func parseExternalType(currentPackagePath, importPath, typeName string, typeMapp
 		if mappedType, ok := defaultTypeMappings[fullTypeName]; ok {
 
 			return TypeInfo{
-				Name: typeName,
+				Name:     typeName,
+				FullName: fullTypeName,
 				Fields: []FieldInfo{
 					{
 						PackageName: fullTypeName,
@@ -729,7 +734,6 @@ func parseInternalType(currentPackagePath, modulePath, importPath, typeName stri
 	if strings.Contains(typeName, " ") {
 		typeName = strings.Split(typeName, " ")[0]
 	}
-
 	obj := pkg.Types.Scope().Lookup(typeName)
 	if obj == nil {
 		return TypeInfo{}, fmt.Errorf("type %s not found in package %s", typeName, pkgPath)
@@ -739,7 +743,7 @@ func parseInternalType(currentPackagePath, modulePath, importPath, typeName stri
 }
 
 func parseTypeObject(obj types.Object, typeMappings map[string]string) (TypeInfo, error) {
-	typeInfo := TypeInfo{Name: obj.Name()}
+	typeInfo := TypeInfo{Name: obj.Name(), FullName: obj.Name()}
 
 	switch t := obj.Type().Underlying().(type) {
 	case *types.Struct:
@@ -801,7 +805,9 @@ func filterUsedTypes(allTypes []TypeInfo, handlers []HandlerInfo) []TypeInfo {
 
 			// Find the type and add its nested types to the queue
 			for _, t := range allTypes {
-				if t.Name == typeName {
+				tName := strings.Split(strings.TrimSuffix(strings.TrimPrefix(t.Name, "Array<"), ">"), " ")[0]
+
+				if tName == typeName {
 					for _, field := range t.Fields {
 						fieldType := strings.Split(strings.TrimSuffix(strings.TrimPrefix(field.Type, "Array<"), ">"), " ")[0]
 						if !usedTypeSet[fieldType] {
@@ -817,7 +823,8 @@ func filterUsedTypes(allTypes []TypeInfo, handlers []HandlerInfo) []TypeInfo {
 	// Filter types based on the used type set
 	var usedTypes []TypeInfo
 	for _, t := range allTypes {
-		if usedTypeSet[t.Name] {
+		tName := strings.Split(strings.TrimSuffix(strings.TrimPrefix(t.Name, "Array<"), ">"), " ")[0]
+		if usedTypeSet[tName] {
 			usedTypes = append(usedTypes, t)
 		}
 	}
@@ -852,7 +859,7 @@ func parseType(name string, structType *ast.StructType, typeMappings map[string]
 			})
 		}
 	}
-	return TypeInfo{Name: name, Fields: fields}
+	return TypeInfo{FullName: name, Name: name, Fields: fields}
 }
 
 func parseFieldType(expr ast.Expr, typeMappings map[string]string) (string, string, bool, bool) {
@@ -885,6 +892,7 @@ func parseFieldType(expr ast.Expr, typeMappings map[string]string) (string, stri
 
 // Update parseFieldTypeFromTypes to handle more complex types
 func parseFieldTypeFromTypes(t types.Type, typeMappings map[string]string) (string, string, bool) {
+
 	switch t := t.(type) {
 	case *types.Basic:
 		if mappedType, ok := defaultTypeMappings[t.Name()]; ok {
@@ -904,6 +912,10 @@ func parseFieldTypeFromTypes(t types.Type, typeMappings map[string]string) (stri
 	case *types.Interface:
 		return "any", "any", false
 	default:
+		typeName := ExtractAfterLastSlash(t.String())
+		if mappedType, ok := typeMappings[typeName]; ok {
+			return mappedType, typeName, false
+		}
 		return "unknown", "unknown", false
 	}
 }
@@ -1103,4 +1115,14 @@ func findPrettierConfig(startPath string) (string, error) {
 	}
 
 	return "", fmt.Errorf("could not find Prettier config")
+}
+
+// ExtractAfterLastSlash returns the substring after the last '/' in the input string.
+// If no '/' is found, it returns the whole string.
+func ExtractAfterLastSlash(s string) string {
+	lastIndex := strings.LastIndex(s, "/")
+	if lastIndex != -1 {
+		return s[lastIndex+1:]
+	}
+	return s
 }
