@@ -148,32 +148,30 @@ func TestParsePackage(t *testing.T) {
 	goModContent := `module github.com/example/testmodule
 
 go 1.16
-
-require (
-    github.com/lib/pq v1.10.0
-)
 `
 	err = os.WriteFile(filepath.Join(modulePath, "go.mod"), []byte(goModContent), 0644)
 	if err != nil {
 		t.Fatalf("Failed to write go.mod file: %v", err)
 	}
 
-	// Create main.go
+	// Create main.go with modified User struct
 	mainContent := `
 package main
 
 import (
-    "time"
-    "github.com/example/testmodule/internal/models"
-    "github.com/lib/pq"
+	"time"
+	"github.com/example/testmodule/internal/models"
 )
 
+type StringArray []string
+
 type User struct {
-    ID        int             ` + "`json:\"id\"`" + `
-    Name      string          ` + "`json:\"name\"`" + `
-    CreatedAt time.Time       ` + "`json:\"created_at\"`" + `
-    Tags      pq.StringArray  ` + "`json:\"tags\"`" + `
-    Info      models.UserInfo ` + "`json:\"info\"`" + `
+	ID        int                ` + "`json:\"id\"`" + `
+	Name      string             ` + "`json:\"name\"`" + `
+	CreatedAt time.Time          ` + "`json:\"created_at\"`" + `
+	Tags      StringArray        ` + "`json:\"tags\"`" + `
+	Info      models.UserInfo    ` + "`json:\"info\"`" + `
+	InfoArray []models.UserInfo  ` + "`json:\"info_array\"`" + `
 }
 
 // @Method GET
@@ -202,8 +200,8 @@ func CreateUserHandler() {}
 package models
 
 type UserInfo struct {
-    Email string ` + "`json:\"email\"`" + `
-    Age   int    ` + "`json:\"age\"`" + `
+	Email string ` + "`json:\"email\"`" + `
+	Age   int    ` + "`json:\"age\"`" + `
 }
 `
 	err = os.WriteFile(filepath.Join(modulePath, "internal", "models", "user_info.go"), []byte(userInfoContent), 0644)
@@ -211,7 +209,7 @@ type UserInfo struct {
 		t.Fatalf("Failed to write user_info.go file: %v", err)
 	}
 
-	// run go mod in modulePath
+	// Run go mod tidy in modulePath
 	cmd := exec.Command("go", "mod", "tidy")
 	cmd.Dir = modulePath
 	if output, err := cmd.CombinedOutput(); err != nil {
@@ -230,8 +228,8 @@ type UserInfo struct {
 
 	// Test parsing the package
 	customTypeMappings := map[string]string{
-		"time.Time":      "Date",
-		"pq.StringArray": "Array<string>",
+		"time.Time":   "Date",
+		"StringArray": "Array<string>",
 	}
 	types, handlers, err := parsePackage(modulePath, customTypeMappings, true)
 	if err != nil {
@@ -243,18 +241,19 @@ type UserInfo struct {
 		{
 			Name: "User",
 			Fields: []FieldInfo{
-				{Name: "id", Type: "number", JSONName: "id", IsOptional: false},
-				{Name: "name", Type: "string", JSONName: "name", IsOptional: false},
-				{Name: "created_at", Type: "Date", JSONName: "created_at", IsOptional: false},
-				{Name: "tags", Type: "Array<string>", JSONName: "tags", IsOptional: false},
-				{Name: "info", Type: "ModelsUserInfo", JSONName: "info", IsOptional: false},
+				{PackageName: "int", Name: "id", Type: "number", JSONName: "id", IsOptional: false},
+				{PackageName: "string", Name: "name", Type: "string", JSONName: "name", IsOptional: false},
+				{PackageName: "time.Time", Name: "created_at", Type: "Date", JSONName: "created_at", IsOptional: false},
+				{PackageName: "StringArray", Name: "tags", Type: "Array<string>", JSONName: "tags", IsOptional: false},
+				{PackageName: "models.UserInfo", Name: "info", Type: "ModelsUserInfo", JSONName: "info", IsOptional: false},
+				{PackageName: "models.UserInfo", Name: "info_array", Type: "Array<ModelsUserInfo>", JSONName: "info_array", IsOptional: false, IsArray: true},
 			},
 		},
 		{
 			Name: "ModelsUserInfo",
 			Fields: []FieldInfo{
-				{Name: "email", Type: "string", JSONName: "email", IsOptional: false},
-				{Name: "age", Type: "number", JSONName: "age", IsOptional: false},
+				{PackageName: "string", Name: "email", Type: "string", JSONName: "email", IsOptional: false},
+				{PackageName: "int", Name: "age", Type: "number", JSONName: "age", IsOptional: false},
 			},
 		},
 	}
