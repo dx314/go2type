@@ -87,7 +87,7 @@ async function createQuery<TInput, TOutput>(
     const data = await response.json();
     {{if $useDateObject}}
     // Parse dates in the response
-    return JSON.parse(JSON.stringify(data), (key, value) =>
+    return JSON.parse(JSON.stringify(data), (_, value) =>
       typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value) ? parseDate(value) : value
     ) as TOutput;
     {{else}}
